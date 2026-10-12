@@ -76,6 +76,19 @@ describe("parseServerEnv", () => {
     );
   });
 
+  it("tolerates the integration's publishable key but rejects a secret key under that name", () => {
+    const anonJwt = `x.${Buffer.from(JSON.stringify({ role: "anon" })).toString("base64url")}.y`;
+    const serviceJwt = `x.${Buffer.from(JSON.stringify({ role: "service_role" })).toString("base64url")}.y`;
+    expect(() => parseServerEnv({ ...valid, NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: "sb_publishable_synthetic123" })).not.toThrow();
+    expect(() => parseServerEnv({ ...valid, NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: anonJwt })).not.toThrow();
+    expect(() => parseServerEnv({ ...valid, NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: "sb_secret_synthetic123" })).toThrow(
+      /NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY/,
+    );
+    expect(() => parseServerEnv({ ...valid, NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: serviceJwt })).toThrow(
+      /NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY/,
+    );
+  });
+
   it("never echoes secret values in error messages", () => {
     const secret = "sentinel-super-secret-value-should-not-appear";
     try {

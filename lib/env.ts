@@ -15,7 +15,24 @@ import { z } from "zod";
 export const PUBLIC_ENV_ALLOWLIST = [
   "NEXT_PUBLIC_SUPABASE_URL",
   "NEXT_PUBLIC_SUPABASE_ANON_KEY",
+  // Added automatically by the Vercel-Supabase integration. Public by design,
+  // tolerated but not referenced by app code (so never inlined). Checked below
+  // to make sure it is not a secret key placed under a public name.
+  "NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY",
 ] as const;
+
+/** True only for values that are safe to publish: sb_publishable_ keys or legacy anon JWTs. */
+export function isPublishableKey(v: string): boolean {
+  if (v.startsWith("sb_publishable_")) return true;
+  const parts = v.split(".");
+  if (parts.length !== 3) return false;
+  try {
+    const payload = JSON.parse(Buffer.from(parts[1], "base64url").toString("utf8")) as { role?: unknown };
+    return payload.role === "anon";
+  } catch {
+    return false;
+  }
+}
 
 const domainRegex = /^(?=.{1,253}$)(?!-)[a-z0-9-]{1,63}(?<!-)(\.(?!-)[a-z0-9-]{1,63}(?<!-))+$/;
 
@@ -48,6 +65,10 @@ export const serverEnvSchema = publicEnvSchema.extend({
   GOOGLE_GMAIL_CLIENT_SECRET: z.string().min(10).optional(),
   TOKEN_ENCRYPTION_KEY: base64Key32.optional(),
   TOKEN_ENCRYPTION_KEY_VERSION: z.coerce.number().int().min(1).max(32767).default(1),
+  NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: z
+    .string()
+    .refine(isPublishableKey, "must be a publishable (sb_publishable_) or anon key, never a secret/service key")
+    .optional(),
   // Not used by Phase 1 code paths. Validated only if present so that a
   // malformed value is caught early. Never exposed to the browser.
   SUPABASE_SERVICE_ROLE_KEY: z.string().min(20).optional(),

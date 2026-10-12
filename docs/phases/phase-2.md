@@ -18,6 +18,7 @@ One employee signs in, separately authorizes Gmail, sees which mailbox is connec
 | Disconnect | Revokes at Google first, then deletes the stored token; result shown and audited |
 | Failure handling | Declined consent, invalid/forged/expired state, missing refresh token, scope not granted, wrong mailbox, store failure, revoked access (`invalid_grant`/401), API errors |
 | Config | `FEATURE_GMAIL` may be `on` only with `GOOGLE_GMAIL_CLIENT_ID`, `GOOGLE_GMAIL_CLIENT_SECRET`, `TOKEN_ENCRYPTION_KEY` (32 bytes). Slack still forced off |
+| Vercel–Supabase integration | `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` (added automatically by the integration) is tolerated; it must be a `sb_publishable_` or anon key, or the app refuses to start. App code doesn't reference it, so it isn't shipped to browsers |
 | UI | Cirkla visual identity: Fraunces / Inter / JetBrains Mono (self-hosted, CSP-safe), Paper/Cream/Green/Butter palette, pill buttons, cards; sign-in, dashboard, admin restyled |
 
 ## Tests run here
