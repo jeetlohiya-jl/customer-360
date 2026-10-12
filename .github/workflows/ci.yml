@@ -25,8 +25,13 @@ jobs:
       NEXT_PUBLIC_SUPABASE_ANON_KEY: ci-synthetic-publishable-key-0123456789
       APP_BASE_URL: http://localhost:3000
       WORKSPACE_DOMAIN: gocirkla.com
-      FEATURE_GMAIL: "off"
+      # Gmail on with synthetic values, so the bundle scan also proves the
+      # Gmail client secret and encryption key never reach the browser.
+      FEATURE_GMAIL: "on"
       FEATURE_SLACK: "off"
+      GOOGLE_GMAIL_CLIENT_ID: ci-synthetic-client.apps.googleusercontent.com
+      GOOGLE_GMAIL_CLIENT_SECRET: ci-sentinel-gmail-secret-93fd2a
+      TOKEN_ENCRYPTION_KEY: Y2ktc2VudGluZWwta2V5LTMyLWJ5dGVzLWxvbmctISE=
       SUPABASE_SERVICE_ROLE_KEY: ci-sentinel-service-role-6c1d0b7f
       DATABASE_URL: postgres://ci-sentinel-user:ci-sentinel-pass-41aa@localhost:5432/none
     steps:

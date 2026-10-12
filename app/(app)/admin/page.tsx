@@ -22,16 +22,22 @@ export default async function AdminPage({
 
   return (
     <>
-      <h1>Admin</h1>
+      <div className="page-head">
+        <span className="eyebrow">Admin</span>
+        <h1 className="h1">
+          People and <em>access.</em>
+        </h1>
+      </div>
       {error ? (
-        <p className="alert" role="alert">
+        <p className="notice alert" role="alert">
           Could not complete that change: {error}
         </p>
       ) : null}
-      {ok ? <p className="ok">Role updated.</p> : null}
+      {ok ? <p className="notice">Role updated.</p> : null}
 
-      <section className="card">
-        <h2>Users</h2>
+      <section className="card section">
+        <span className="eyebrow">01 · Users</span>
+        <div className="table-wrap">
         <table>
           <thead>
             <tr>
@@ -54,7 +60,7 @@ export default async function AdminPage({
                       <option value="member">member</option>
                       <option value="admin">admin</option>
                     </select>
-                    <button type="submit" disabled={u.id === me.id}>
+                    <button type="submit" className="btn-secondary" disabled={u.id === me.id}>
                       Save
                     </button>
                   </form>
@@ -63,10 +69,12 @@ export default async function AdminPage({
             ))}
           </tbody>
         </table>
+        </div>
       </section>
 
-      <section className="card">
-        <h2>Recent audit events</h2>
+      <section className="card section">
+        <span className="eyebrow">02 · Recent audit events</span>
+        <div className="table-wrap">
         <table>
           <thead>
             <tr>
@@ -87,6 +95,7 @@ export default async function AdminPage({
             ))}
           </tbody>
         </table>
+        </div>
       </section>
     </>
   );

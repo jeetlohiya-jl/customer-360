@@ -5,20 +5,29 @@ import { signOut } from "./actions";
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
   const user = await requireUser();
   return (
-    <div className="shell">
+    <div>
       <header className="topbar">
         <nav>
           <Link href="/dashboard" className="brand">
-            Customer 360
+            <span className="brand-mark">Cirkla</span>
+            <span className="brand-name">
+              Customer <em>360</em>
+            </span>
           </Link>
-          <Link href="/dashboard">Dashboard</Link>
-          {user.role === "admin" ? <Link href="/admin">Admin</Link> : null}
+          <Link href="/dashboard" className="navlink">
+            Dashboard
+          </Link>
+          {user.role === "admin" ? (
+            <Link href="/admin" className="navlink">
+              Admin
+            </Link>
+          ) : null}
         </nav>
         <div className="who">
           <span>{user.email}</span>
-          <span className="badge">{user.role}</span>
+          <span className="pill">{user.role}</span>
           <form action={signOut}>
-            <button type="submit" className="link">
+            <button type="submit" className="btn-ghost">
               Sign out
             </button>
           </form>

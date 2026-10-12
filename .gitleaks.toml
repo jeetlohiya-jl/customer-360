@@ -10,4 +10,6 @@ regexes = [
   '''synthetic-publishable-key-0123456789''',
   '''ci-synthetic-publishable-key-0123456789''',
   '''<supabase-publishable-or-anon-key>''',
+  '''Y2ktc2VudGluZWwta2V5LTMyLWJ5dGVzLWxvbmctISE=''',
+  '''ci-synthetic-client\.apps\.googleusercontent\.com''',
 ]

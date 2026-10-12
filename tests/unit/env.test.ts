@@ -35,9 +35,33 @@ describe("parseServerEnv", () => {
     expect(() => parseServerEnv({ ...valid, WORKSPACE_DOMAIN: "" })).toThrow(/WORKSPACE_DOMAIN/);
   });
 
-  it("rejects enabling Gmail or Slack in Phase 1", () => {
-    expect(() => parseServerEnv({ ...valid, FEATURE_GMAIL: "on" })).toThrow(/FEATURE_GMAIL/);
+  it("Slack cannot be enabled", () => {
     expect(() => parseServerEnv({ ...valid, FEATURE_SLACK: "on" })).toThrow(/FEATURE_SLACK/);
+  });
+
+  it("Gmail can be enabled only with its client and encryption key", () => {
+    expect(() => parseServerEnv({ ...valid, FEATURE_GMAIL: "on" })).toThrow(
+      /GOOGLE_GMAIL_CLIENT_ID[\s\S]*GOOGLE_GMAIL_CLIENT_SECRET[\s\S]*TOKEN_ENCRYPTION_KEY/,
+    );
+    const env = parseServerEnv({
+      ...valid,
+      FEATURE_GMAIL: "on",
+      GOOGLE_GMAIL_CLIENT_ID: "123-abc.apps.googleusercontent.com",
+      GOOGLE_GMAIL_CLIENT_SECRET: "synthetic-client-secret",
+      TOKEN_ENCRYPTION_KEY: Buffer.alloc(32, 7).toString("base64"),
+    });
+    expect(env.FEATURE_GMAIL).toBe("on");
+    expect(env.TOKEN_ENCRYPTION_KEY_VERSION).toBe(1);
+  });
+
+  it("rejects a weak or malformed encryption key and a malformed client id", () => {
+    const on = { ...valid, FEATURE_GMAIL: "on", GOOGLE_GMAIL_CLIENT_SECRET: "synthetic-client-secret" };
+    expect(() =>
+      parseServerEnv({ ...on, GOOGLE_GMAIL_CLIENT_ID: "x.apps.googleusercontent.com", TOKEN_ENCRYPTION_KEY: "c2hvcnQ=" }),
+    ).toThrow(/TOKEN_ENCRYPTION_KEY/);
+    expect(() =>
+      parseServerEnv({ ...on, GOOGLE_GMAIL_CLIENT_ID: "not-a-client-id", TOKEN_ENCRYPTION_KEY: Buffer.alloc(32).toString("base64") }),
+    ).toThrow(/GOOGLE_GMAIL_CLIENT_ID/);
   });
 
   it("rejects malformed values", () => {

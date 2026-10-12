@@ -8,7 +8,8 @@ import { z } from "zod";
  * - Public (NEXT_PUBLIC_*) variables are inlined into the browser bundle by
  *   Next.js, so they must never hold secrets. Only the allowlisted names in
  *   PUBLIC_ENV_ALLOWLIST may exist.
- * - Phase 1: Gmail and Slack must be "off". The schema rejects anything else.
+ * - Gmail (Phase 2 proof of concept) may be "on" only together with its OAuth
+ *   client and token-encryption key. Slack must still be "off".
  */
 
 export const PUBLIC_ENV_ALLOWLIST = [
@@ -23,15 +24,30 @@ export const publicEnvSchema = z.object({
   NEXT_PUBLIC_SUPABASE_ANON_KEY: z.string().min(20, "looks too short to be a Supabase publishable/anon key"),
 });
 
+const base64Key32 = z
+  .string()
+  .refine((v) => {
+    try {
+      return Buffer.from(v, "base64").length === 32;
+    } catch {
+      return false;
+    }
+  }, "must be 32 random bytes, base64-encoded (see README)");
+
 export const serverEnvSchema = publicEnvSchema.extend({
   APP_BASE_URL: z.url({ protocol: /^https?$/ }).transform((u) => u.replace(/\/+$/, "")),
   WORKSPACE_DOMAIN: z
     .string()
     .transform((d) => d.trim().toLowerCase())
     .refine((d) => domainRegex.test(d), "must be a bare domain such as gocirkla.com"),
-  // Phase 1 hard stop: integrations cannot be enabled by configuration.
-  FEATURE_GMAIL: z.literal("off", { error: "Phase 1: FEATURE_GMAIL must be 'off'" }),
-  FEATURE_SLACK: z.literal("off", { error: "Phase 1: FEATURE_SLACK must be 'off'" }),
+  FEATURE_GMAIL: z.enum(["on", "off"], { error: "FEATURE_GMAIL must be 'on' or 'off'" }),
+  // Slack is not built yet; it cannot be enabled by configuration.
+  FEATURE_SLACK: z.literal("off", { error: "FEATURE_SLACK must be 'off' (Slack is not built yet)" }),
+  // Gmail connection (required when FEATURE_GMAIL=on). Server-only.
+  GOOGLE_GMAIL_CLIENT_ID: z.string().regex(/\.apps\.googleusercontent\.com$/, "must be a Google OAuth client ID").optional(),
+  GOOGLE_GMAIL_CLIENT_SECRET: z.string().min(10).optional(),
+  TOKEN_ENCRYPTION_KEY: base64Key32.optional(),
+  TOKEN_ENCRYPTION_KEY_VERSION: z.coerce.number().int().min(1).max(32767).default(1),
   // Not used by Phase 1 code paths. Validated only if present so that a
   // malformed value is caught early. Never exposed to the browser.
   SUPABASE_SERVICE_ROLE_KEY: z.string().min(20).optional(),
@@ -39,6 +55,11 @@ export const serverEnvSchema = publicEnvSchema.extend({
     .string()
     .regex(/^postgres(ql)?:\/\//, "must be a postgres:// connection string")
     .optional(),
+}).superRefine((env, ctx) => {
+  if (env.FEATURE_GMAIL !== "on") return;
+  for (const key of ["GOOGLE_GMAIL_CLIENT_ID", "GOOGLE_GMAIL_CLIENT_SECRET", "TOKEN_ENCRYPTION_KEY"] as const) {
+    if (!env[key]) ctx.addIssue({ code: "custom", path: [key], message: "required when FEATURE_GMAIL=on" });
+  }
 });
 
 export type ServerEnv = z.infer<typeof serverEnvSchema>;

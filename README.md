@@ -1,8 +1,8 @@
 # Customer 360
 
-Cirkla's internal customer-intelligence app: Gmail-sourced business knowledge with a Slack assistant. This repository is at **Phase 1**: application skeleton, Google Workspace sign-in and secure configuration.
+Cirkla's internal customer-intelligence app: Gmail-sourced business knowledge with a Slack assistant. This repository is at **Phase 2**: Workspace sign-in plus a **Gmail connection proof of concept**. An employee can connect their own mailbox (read-only `gmail.metadata`), see up to five recent message headers fetched live from the Gmail API, and disconnect. The UI follows the Cirkla visual identity.
 
-**Not included in Phase 1:** Gmail access, email ingestion, Slack, and migrations against any hosted Supabase project. Both integrations are hard-disabled: the app won't start unless `FEATURE_GMAIL=off` and `FEATURE_SLACK=off`.
+**Not included yet:** email import or storage, background sync, push notifications, AI extraction, Slack. Slack is hard-disabled (`FEATURE_SLACK` must be `off`).
 
 Architecture and policies: see the Customer 360 architecture plan (revision 3) shared with the team. The Phase 1 report is in [`docs/phases/phase-1.md`](docs/phases/phase-1.md).
 
@@ -81,6 +81,15 @@ Every variable is listed in [`.env.example`](.env.example) with placeholders onl
 - **Roles:** the first admin is set once with `private.grant_initial_admin(email)` by the database owner. After that, only admins grant roles, and an admin can't change their own role, so there's always at least one admin.
 - **Headers:** per-request nonce Content-Security-Policy (no inline scripts), HSTS, frame denial, nosniff, strict referrer policy, permissions policy.
 - **Secrets:** CI scans the browser bundle for server-only values and scans git history with gitleaks.
+
+## Gmail connection (Phase 2)
+
+- Turn on with `FEATURE_GMAIL=on` plus `GOOGLE_GMAIL_CLIENT_ID`, `GOOGLE_GMAIL_CLIENT_SECRET` and `TOKEN_ENCRYPTION_KEY` (see `.env.example`). The app refuses to start if any is missing.
+- The Google OAuth client "Customer 360 - Gmail" needs these redirect URIs: `http://localhost:3000/api/oauth/gmail/callback` and `https://<production-domain>/api/oauth/gmail/callback`.
+- Only `https://www.googleapis.com/auth/gmail.metadata` is requested (headers and labels, never bodies). A unit test fails if any other Gmail scope appears in the code.
+- The refresh token is encrypted (AES-256-GCM) before it reaches the database and stored in `private.gmail_connections`, reachable only through functions that act on the signed-in user.
+- Apply the migration with `npx supabase@2.120.0 db push --dry-run` (review), then `db push`.
+- Details, tests and limitations: [`docs/phases/phase-2.md`](docs/phases/phase-2.md).
 
 ## Hosted setup (at the Phase 1 review checkpoint, not before)
 

@@ -1,9 +1,13 @@
 import type { Metadata } from "next";
 import { headers } from "next/headers";
+import "@fontsource-variable/fraunces/opsz.css";
+import "@fontsource-variable/fraunces/opsz-italic.css";
+import "@fontsource-variable/inter/index.css";
+import "@fontsource-variable/jetbrains-mono/index.css";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Customer 360",
+  title: "Customer 360 · Cirkla",
   description: "Cirkla internal customer intelligence",
   robots: { index: false, follow: false },
 };

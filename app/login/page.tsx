@@ -16,21 +16,30 @@ export default async function LoginPage({
   const message = error ? (MESSAGES[error] ?? MESSAGES.callback) : null;
 
   return (
-    <main className="center">
-      <div className="card narrow">
-        <h1>Customer 360</h1>
-        <p className="muted">Sign in with your Cirkla Google Workspace account.</p>
+    <main className="signin">
+      <div className="signin-card">
+        <span className="eyebrow-chip">
+          <span className="dot" />
+          Internal · Cirkla Google Workspace
+        </span>
+        <h1 className="display">
+          Customer <em>360.</em>
+        </h1>
+        <p className="lead">Customer knowledge from Cirkla&apos;s email, in one place.</p>
         {message ? (
-          <p className="alert" role="alert">
+          <p className="notice alert" role="alert">
             {message}
           </p>
         ) : null}
         <form action={signInWithGoogle}>
-          <button type="submit" className="primary">
+          <button type="submit" className="btn-primary btn-block">
             Sign in with Google
+            <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true">
+              <path d="M2 7h10m0 0L7 2m5 5L7 12" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
           </button>
         </form>
-        <p className="fine">Sign-in reads your name and email only. It does not access your mailbox.</p>
+        <p className="fine">Signing in reads your name and email only. Mailbox access is a separate step you choose later.</p>
       </div>
     </main>
   );

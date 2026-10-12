@@ -1,12 +1,16 @@
 /**
- * Feature flags. In Phase 1 both integrations are hard-disabled: the env
- * schema only accepts "off", and these helpers return false regardless.
- * Later phases will read the validated env instead.
+ * Feature flags.
+ *
+ * - Gmail: controlled by FEATURE_GMAIL (validated env). When "on", the env
+ *   schema also guarantees the OAuth client and encryption key are present.
+ * - Slack: not built; always off.
  */
-export const PHASE = 1 as const;
+import { getServerEnv } from "@/lib/env";
 
-export function isGmailEnabled(): false {
-  return false;
+export const PHASE = 2 as const;
+
+export function isGmailEnabled(): boolean {
+  return getServerEnv().FEATURE_GMAIL === "on";
 }
 
 export function isSlackEnabled(): false {
@@ -14,5 +18,5 @@ export function isSlackEnabled(): false {
 }
 
 export function featureSummary() {
-  return { gmail: "off", slack: "off" } as const;
+  return { gmail: isGmailEnabled() ? "on" : "off", slack: "off" } as const;
 }

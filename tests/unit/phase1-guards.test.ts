@@ -2,7 +2,8 @@ import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join, relative } from "node:path";
 import { describe, expect, it } from "vitest";
 import { SIGN_IN_SCOPES, containsGmailScope, signInScopeString } from "@/lib/auth/scopes";
-import { featureSummary, isGmailEnabled, isSlackEnabled } from "@/lib/features";
+import { isSlackEnabled } from "@/lib/features";
+import { GMAIL_SCOPE } from "@/lib/gmail/google";
 import { isPublicPath } from "@/proxy";
 
 const ROOT = join(__dirname, "..", "..");
@@ -15,7 +16,7 @@ function sourceFiles(dir: string): string[] {
   });
 }
 
-describe("Phase 1: no Gmail access anywhere", () => {
+describe("Gmail access is narrow and contained", () => {
   it("sign-in requests identity scopes only", () => {
     expect([...SIGN_IN_SCOPES]).toEqual(["openid", "email", "profile"]);
     expect(signInScopeString()).toBe("openid email profile");
@@ -26,16 +27,21 @@ describe("Phase 1: no Gmail access anywhere", () => {
     expect(containsGmailScope(["openid", "https://www.googleapis.com/auth/gmail.readonly"])).toBe(true);
   });
 
-  it("no application source references a Gmail OAuth scope or the Gmail API", () => {
+  it("Gmail scopes and the Gmail API appear in exactly one module", () => {
     const files = ["app", "lib"].flatMap((d) => sourceFiles(join(ROOT, d))).concat([join(ROOT, "proxy.ts")]);
-    const offenders = files.filter((f) => /googleapis\.com\/auth\/gmail|gmail\.googleapis\.com/i.test(readFileSync(f, "utf8")));
-    expect(offenders.map((f) => relative(ROOT, f))).toEqual([]);
+    const users = files.filter((f) => /googleapis\.com\/auth\/gmail|gmail\.googleapis\.com/i.test(readFileSync(f, "utf8")));
+    expect(users.map((f) => relative(ROOT, f).replace(/\\/g, "/"))).toEqual(["lib/gmail/google.ts"]);
   });
 
-  it("integrations report disabled", () => {
-    expect(isGmailEnabled()).toBe(false);
+  it("the only Gmail permission ever requested is gmail.metadata (no bodies, read-only)", () => {
+    expect(GMAIL_SCOPE).toBe("https://www.googleapis.com/auth/gmail.metadata");
+    const src = readFileSync(join(ROOT, "lib", "gmail", "google.ts"), "utf8");
+    const scopes = src.match(/googleapis\.com\/auth\/[a-z.]+/g) ?? [];
+    expect([...new Set(scopes)]).toEqual(["googleapis.com/auth/gmail.metadata"]);
+  });
+
+  it("Slack stays disabled", () => {
     expect(isSlackEnabled()).toBe(false);
-    expect(featureSummary()).toEqual({ gmail: "off", slack: "off" });
   });
 });
 

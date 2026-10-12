@@ -6,7 +6,13 @@ import { readdirSync, readFileSync, statSync, existsSync } from "node:fs";
 import { join } from "node:path";
 
 const CLIENT_DIR = join(process.cwd(), ".next", "static");
-const SERVER_ONLY_NAMES = ["SUPABASE_SERVICE_ROLE_KEY", "DATABASE_URL", "TOKEN_ENCRYPTION_KEY", "WORKER_SHARED_SECRET"];
+const SERVER_ONLY_NAMES = [
+  "SUPABASE_SERVICE_ROLE_KEY",
+  "DATABASE_URL",
+  "TOKEN_ENCRYPTION_KEY",
+  "GOOGLE_GMAIL_CLIENT_SECRET",
+  "WORKER_SHARED_SECRET",
+];
 
 if (!existsSync(CLIENT_DIR)) {
   console.error("No .next/static directory. Run `npm run build` first.");

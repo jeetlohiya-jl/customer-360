@@ -55,7 +55,7 @@ try {
   const health = await fetch(`${BASE}/api/health`);
   const body = await health.json();
   check(health.status === 200 && body.status === "ok", "GET /api/health returns ok");
-  check(body.features?.gmail === "off" && body.features?.slack === "off", "health reports Gmail and Slack off");
+  check(["on", "off"].includes(body.features?.gmail) && body.features?.slack === "off", "health reports Gmail status and Slack off");
   check(!JSON.stringify(body).match(/key|secret|token|password/i), "health response contains no secrets");
   check((health.headers.get("content-security-policy") ?? "").includes("default-src 'none'"), "API responses carry deny-all CSP");
 
