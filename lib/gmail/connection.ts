@@ -72,6 +72,14 @@ export function beginAuthorization(user: CurrentUser, env: GmailEnv) {
   };
 }
 
+/** Diagnostic log for a failed step: step name, HTTP status and Google's error code only. */
+function logFailure(step: "token" | "profile", e: unknown) {
+  const g = e instanceof GmailError ? e : undefined;
+  console.warn(
+    JSON.stringify({ event: "gmail_callback_detail", step, status: g?.httpStatus ?? null, reason: g?.reason ?? (g ? g.code : "network") }),
+  );
+}
+
 export type CallbackResult =
   | "connected"
   | "denied"
@@ -114,6 +122,7 @@ export async function completeAuthorization(
     });
   } catch (e) {
     if (e instanceof GmailError && (e.code === "no_refresh_token" || e.code === "scope_not_granted")) return e.code;
+    logFailure("token", e);
     return "token_exchange_failed";
   }
   const refreshToken = tokens.refreshToken as string;
@@ -122,7 +131,8 @@ export async function completeAuthorization(
   let mailbox: string;
   try {
     mailbox = await getMailboxAddress(tokens.accessToken);
-  } catch {
+  } catch (e) {
+    logFailure("profile", e);
     await revokeToken(refreshToken).catch(() => false);
     return "token_exchange_failed";
   }

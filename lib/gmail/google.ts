@@ -29,10 +29,30 @@ export class GmailError extends Error {
       | "revoked"
       | "gmail_api_error",
     public readonly httpStatus?: number,
+    /** Google's machine-readable error code (e.g. invalid_client, SERVICE_DISABLED). Never a message or value. */
+    public readonly reason?: string,
   ) {
     super(code);
     this.name = "GmailError";
   }
+}
+
+/** Keep only short enum-like error codes from Google responses; drop anything else. */
+export function safeReason(v: unknown): string | undefined {
+  return typeof v === "string" && /^[A-Za-z_]{1,40}$/.test(v) ? v : undefined;
+}
+
+async function oauthErrorReason(res: Response): Promise<string | undefined> {
+  const body = (await res.json().catch(() => ({}))) as { error?: unknown };
+  return safeReason(body.error);
+}
+
+async function apiErrorReason(res: Response): Promise<string | undefined> {
+  const body = (await res.json().catch(() => ({}))) as {
+    error?: { status?: unknown; details?: Array<{ reason?: unknown }>; errors?: Array<{ reason?: unknown }> };
+  };
+  const e = body.error;
+  return safeReason(e?.details?.find((d) => d?.reason)?.reason) ?? safeReason(e?.errors?.[0]?.reason) ?? safeReason(e?.status);
 }
 
 export function pkceChallenge(verifier: string): string {
@@ -86,7 +106,7 @@ export async function exchangeCode(
     }),
     cache: "no-store",
   });
-  if (!res.ok) throw new GmailError("token_exchange_failed", res.status);
+  if (!res.ok) throw new GmailError("token_exchange_failed", res.status, await oauthErrorReason(res));
   const body = (await res.json()) as { access_token?: string; refresh_token?: string; scope?: string };
   if (!body.access_token) throw new GmailError("token_exchange_failed", res.status);
   const scopes = (body.scope ?? "").split(/\s+/).filter(Boolean);
@@ -137,8 +157,8 @@ async function gmailGet<T>(path: string, accessToken: string, fetchImpl: Fetch):
     headers: { Authorization: `Bearer ${accessToken}` },
     cache: "no-store",
   });
-  if (res.status === 401) throw new GmailError("revoked", 401);
-  if (!res.ok) throw new GmailError("gmail_api_error", res.status);
+  if (res.status === 401) throw new GmailError("revoked", 401, await apiErrorReason(res));
+  if (!res.ok) throw new GmailError("gmail_api_error", res.status, await apiErrorReason(res));
   return (await res.json()) as T;
 }
 

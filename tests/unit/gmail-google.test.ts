@@ -72,6 +72,19 @@ describe("token exchange", () => {
     });
   });
 
+  it("keeps only Google's error code as a safe diagnostic reason", async () => {
+    await expect(
+      exchangeCode(opts, (async () => json(401, { error: "invalid_client", error_description: "The OAuth client was not found." })) as unknown as typeof fetch),
+    ).rejects.toMatchObject({ code: "token_exchange_failed", httpStatus: 401, reason: "invalid_client" });
+    await expect(
+      exchangeCode(opts, (async () => json(400, { error: "secret value with spaces and @ symbols" })) as unknown as typeof fetch),
+    ).rejects.toMatchObject({ code: "token_exchange_failed", reason: undefined });
+    await expect(
+      getMailboxAddress("at", (async () =>
+        json(403, { error: { code: 403, message: "Gmail API has not been used in project 123", status: "PERMISSION_DENIED", details: [{ reason: "SERVICE_DISABLED" }] } })) as unknown as typeof fetch),
+    ).rejects.toMatchObject({ code: "gmail_api_error", httpStatus: 403, reason: "SERVICE_DISABLED" });
+  });
+
   it("detects revoked access on refresh (invalid_grant)", async () => {
     await expect(
       refreshAccessToken({ refreshToken: "rt", clientId: "id", clientSecret: "s" }, (async () =>
