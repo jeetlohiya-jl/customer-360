@@ -1,0 +1,13 @@
+# Gitleaks configuration: default rules, plus allowlisted synthetic test values.
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Synthetic placeholders and CI sentinels (not real secrets)"
+regexes = [
+  '''ci-sentinel-[a-z0-9-]+''',
+  '''sentinel-[a-z0-9-]+''',
+  '''synthetic-publishable-key-0123456789''',
+  '''ci-synthetic-publishable-key-0123456789''',
+  '''<supabase-publishable-or-anon-key>''',
+]

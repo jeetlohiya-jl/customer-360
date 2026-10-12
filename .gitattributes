@@ -1,0 +1,7 @@
+# Keep LF line endings in the repository and working tree on every OS.
+# Prevents Windows CRLF conversion from breaking shell scripts, SQL tests
+# and line-based checks in CI.
+* text=auto eol=lf
+*.png binary
+*.ico binary
+*.zip binary

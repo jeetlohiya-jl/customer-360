@@ -1,0 +1,49 @@
+# Supabase CLI configuration for LOCAL development and CI only.
+# Hosted project settings are configured in the Supabase dashboard
+# (see README "Hosted setup", done at the Phase 1 review checkpoint).
+
+project_id = "customer-360"
+
+[api]
+enabled = true
+port = 54321
+# Only these schemas are served by the Data API. `private` must never be added.
+schemas = ["public", "graphql_public"]
+extra_search_path = ["public", "extensions"]
+max_rows = 1000
+
+[db]
+port = 54322
+shadow_port = 54320
+major_version = 17
+
+[db.seed]
+enabled = true
+sql_paths = ["./seed.sql"]
+
+[studio]
+enabled = true
+port = 54323
+
+[auth]
+enabled = true
+site_url = "http://localhost:3000"
+additional_redirect_urls = ["http://localhost:3000/auth/callback"]
+jwt_expiry = 3600
+enable_refresh_token_rotation = true
+refresh_token_reuse_interval = 10
+enable_signup = true
+enable_anonymous_sign_ins = false
+
+[auth.email]
+# Email/password sign-in is disabled; Google Workspace is the only provider.
+enable_signup = false
+
+[auth.external.google]
+# Disabled by default so `supabase start` and CI need no Google credentials.
+# To test real sign-in locally, set enabled = true and export the two env vars
+# below from your "Sign-in" OAuth client (never commit their values).
+enabled = false
+client_id = "env(SUPABASE_AUTH_EXTERNAL_GOOGLE_CLIENT_ID)"
+secret = "env(SUPABASE_AUTH_EXTERNAL_GOOGLE_SECRET)"
+skip_nonce_check = false

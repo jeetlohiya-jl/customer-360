@@ -1,0 +1,69 @@
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  app:
+    name: Lint, types, unit tests, build, bundle and header checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      NEXT_TELEMETRY_DISABLED: "1"
+      # Synthetic values only. Server-only variables are unique sentinels so the
+      # bundle scan can prove their VALUES never reach the browser.
+      NEXT_PUBLIC_SUPABASE_URL: http://127.0.0.1:54321
+      NEXT_PUBLIC_SUPABASE_ANON_KEY: ci-synthetic-publishable-key-0123456789
+      APP_BASE_URL: http://localhost:3000
+      WORKSPACE_DOMAIN: gocirkla.com
+      FEATURE_GMAIL: "off"
+      FEATURE_SLACK: "off"
+      SUPABASE_SERVICE_ROLE_KEY: ci-sentinel-service-role-6c1d0b7f
+      DATABASE_URL: postgres://ci-sentinel-user:ci-sentinel-pass-41aa@localhost:5432/none
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build
+      - run: npm run check:bundle
+      - run: npm run check:headers
+
+  database:
+    name: Migrations and pgTAP tests (local Supabase stack)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: supabase/setup-cli@v1
+        with:
+          version: 2.120.0
+      # Starts only the database container; no hosted project is involved.
+      - run: supabase db start
+      - run: supabase test db
+
+  secrets:
+    name: Secret scan (full history)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
