@@ -18,9 +18,14 @@ export default async function AppLayout({ children }: { children: React.ReactNod
             Dashboard
           </Link>
           {user.role === "admin" ? (
-            <Link href="/admin" className="navlink">
-              Admin
-            </Link>
+            <>
+              <Link href="/customers" className="navlink">
+                Customers
+              </Link>
+              <Link href="/admin" className="navlink">
+                Admin
+              </Link>
+            </>
           ) : null}
         </nav>
         <div className="who">

@@ -1,5 +1,5 @@
 import { requireUser } from "@/lib/auth/session";
-import { PHASE, featureSummary } from "@/lib/features";
+import { PHASE, PHASE_LABEL, featureSummary } from "@/lib/features";
 import { loadGmailPanel, type GmailPanel } from "@/lib/gmail/connection";
 import { MAX_MESSAGES } from "@/lib/gmail/google";
 import { connectGmail, disconnectGmail } from "../gmail-actions";
@@ -72,7 +72,7 @@ export default async function DashboardPage({
               <dt>Status</dt>
               <dd>{user.status}</dd>
               <dt>Build</dt>
-              <dd>Phase {PHASE} · Gmail proof of concept</dd>
+              <dd>Phase {PHASE} · {PHASE_LABEL}</dd>
               <dt>Slack</dt>
               <dd>
                 <span className="pill off">{features.slack}</span>

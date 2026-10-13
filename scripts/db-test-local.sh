@@ -20,7 +20,7 @@ cleanup() {
 }
 trap cleanup EXIT
 
-"$PGBIN/initdb" -D "$DATA" -U postgres -A trust >/dev/null
+"$PGBIN/initdb" -D "$DATA" -U postgres -A trust -E UTF8 --locale=C >/dev/null
 "$PGBIN/pg_ctl" -D "$DATA" -o "-p $PORT -k $WORK -c listen_addresses=''" -l "$WORK/pg.log" -w start >/dev/null
 
 PSQL=(psql -h "$WORK" -p "$PORT" -U postgres -v ON_ERROR_STOP=1 -q)

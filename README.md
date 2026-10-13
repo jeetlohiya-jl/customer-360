@@ -91,6 +91,13 @@ Every variable is listed in [`.env.example`](.env.example) with placeholders onl
 - Apply the migration with `npx supabase@2.120.0 db push --dry-run` (review), then `db push`.
 - Details, tests and limitations: [`docs/phases/phase-2.md`](docs/phases/phase-2.md).
 
+## Customer list and matching (Stage 3.0)
+
+- Admin pages under `/customers`: CSV import with preview, customer pages, review queue, name checker. No Gmail access.
+- CSV template: [`docs/templates/customers-template.csv`](docs/templates/customers-template.csv).
+- Migration `20261013000005_customer_master.sql`: review it, run `npx supabase@2.120.0 db push --dry-run`, apply only after approval.
+- Details: [`docs/phases/phase-3.0.md`](docs/phases/phase-3.0.md).
+
 ## Hosted setup (at the Phase 1 review checkpoint, not before)
 
 Follow section 7 ("Final setup checklist") of the architecture plan: Supabase project in `us-east-1`, Google Cloud project with an **Internal** OAuth consent screen and a "Sign-in" OAuth client, Vercel project with function region `iad1`. Hosted migrations will run only through an approved GitHub Actions workflow in a later phase. **Do not run `supabase db push` against a hosted project.**

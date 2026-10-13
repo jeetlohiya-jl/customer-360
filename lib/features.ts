@@ -7,7 +7,8 @@
  */
 import { getServerEnv } from "@/lib/env";
 
-export const PHASE = 2 as const;
+export const PHASE = "3.0" as const;
+export const PHASE_LABEL = "Customer list and matching (no Gmail scanning)";
 
 export function isGmailEnabled(): boolean {
   return getServerEnv().FEATURE_GMAIL === "on";

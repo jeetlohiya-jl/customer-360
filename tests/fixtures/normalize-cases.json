@@ -1,0 +1,19 @@
+[
+  ["Acme Packaging Limited", "acme packaging"],
+  ["ACME PACKAGING LIMITED", "acme packaging"],
+  ["Acme Packaging Ltd.", "acme packaging"],
+  ["  Acme   Packaging  ", "acme packaging"],
+  ["Acme Packaging, L.L.C.", "acme packaging"],
+  ["Acme Packaging Pvt. Ltd.", "acme packaging"],
+  ["The Acme Company", "acme"],
+  ["Smith & Co", "smith"],
+  ["Smith & Sons Inc", "smith and sons"],
+  ["McDonald's", "mcdonalds"],
+  ["Café Rouge S.A.", "cafe rouge"],
+  ["Nestlé GmbH", "nestle"],
+  ["Ltd", "ltd"],
+  ["The", "the"],
+  ["!!!", ""],
+  ["Bravo-Foods International Corp.", "bravo foods international"],
+  ["3M Company", "3m"]
+]
