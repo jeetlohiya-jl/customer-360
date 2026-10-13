@@ -185,4 +185,53 @@ describe("scan worker", () => {
     expect(url).not.toMatch(/format=(full|raw)/);
     expect(new URL(url).searchParams.getAll("metadataHeaders")).toEqual(["From", "To", "Cc", "Subject", "Date", "Sensitivity", "List-Unsubscribe"]);
   });
+
+  it("tags failures with a stage and a safe code (Stage 3.1.1)", async () => {
+    const f = fakeDb();
+    const codes: string[] = [];
+    f.db.release = async (_id, code) => {
+      codes.push(code);
+      return "released";
+    };
+    const events: Record<string, unknown>[] = [];
+    const secretish = "postgresql://c360_worker.x:SENTINEL-PASSWORD@host/db";
+    const r = await runTick({
+      ...deps(f.db, fakeGmail(10)),
+      decrypt: () => {
+        throw new Error(`Unsupported state or unable to authenticate data ${secretish}`);
+      },
+      log: (e) => events.push(e),
+    });
+    expect(r.status).toBe("released");
+    expect(codes).toEqual(["decrypt:decrypt_failed"]);
+    expect(JSON.stringify(events)).not.toContain("SENTINEL");
+    expect(events).toContainEqual(expect.objectContaining({ event: "scan_page_released", stage: "decrypt", code: "decrypt:decrypt_failed" }));
+  });
+
+  it("a database failure before a job is claimed surfaces as a stage error, not a raw message", async () => {
+    const { StageError, tickErrorEvent } = await import("@/lib/scan/errors");
+    const f = fakeDb();
+    f.db.claimJob = async () => {
+      throw Object.assign(new Error('password authentication failed for user "c360_worker" SENTINEL'), { code: "28P01" });
+    };
+    const err = await runTick(deps(f.db, fakeGmail(10))).catch((e) => e);
+    expect(err).toBeInstanceOf(StageError);
+    expect(tickErrorEvent(err)).toEqual({ event: "scan_tick_error", stage: "db_claim", code: "pg_28P01" });
+    expect(JSON.stringify(tickErrorEvent(err))).not.toContain("SENTINEL");
+  });
+
+  it("a Gmail listing failure is released with the Gmail code and stage", async () => {
+    const f = fakeDb();
+    const codes: string[] = [];
+    f.db.release = async (_id, code) => {
+      codes.push(code);
+      return "released";
+    };
+    const g = fakeGmail(10);
+    g.listIds = async () => {
+      throw new GmailError("gmail_api_error", 503);
+    };
+    expect((await runTick(deps(f.db, g))).status).toBe("released");
+    expect(codes[0]).toMatch(/^gmail_list:gmail:gmail_api_error_503$/);
+  });
 });

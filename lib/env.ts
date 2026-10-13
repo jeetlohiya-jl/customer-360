@@ -10,6 +10,9 @@ import { z } from "zod";
  *   PUBLIC_ENV_ALLOWLIST may exist.
  * - Gmail (Phase 2 proof of concept) may be "on" only together with its OAuth
  *   client and token-encryption key. Slack must still be "off".
+ * - Scan settings (FEATURE_SCAN, CRON_SECRET, WORKER_DATABASE_*) are the one
+ *   exception to "fail closed": a bad value turns scanning off and is logged
+ *   by name, but never stops the site (Stage 3.1.1, see lib/scan/config.ts).
  */
 
 export const PUBLIC_ENV_ALLOWLIST = [
@@ -65,15 +68,13 @@ export const serverEnvSchema = publicEnvSchema.extend({
   GOOGLE_GMAIL_CLIENT_SECRET: z.string().min(10).optional(),
   TOKEN_ENCRYPTION_KEY: base64Key32.optional(),
   TOKEN_ENCRYPTION_KEY_VERSION: z.coerce.number().int().min(1).max(32767).default(1),
-  // Stage 3.1 header scan. Off unless explicitly "on"; then the cron secret and
-  // the worker's own database login are required. Server-only.
-  FEATURE_SCAN: z.enum(["on", "off"], { error: "FEATURE_SCAN must be 'on' or 'off'" }).default("off"),
-  CRON_SECRET: z.string().min(32, "must be at least 32 random characters").optional(),
-  WORKER_DATABASE_URL: z
-    .string()
-    .regex(/^postgres(ql)?:\/\/c360_worker[.:]/, "must be a postgres:// URL for the c360_worker login")
-    .optional(),
-  WORKER_DATABASE_CA: z.string().includes("BEGIN CERTIFICATE", { message: "must be a PEM certificate" }).optional(),
+  // Stage 3.1 header scan. Read leniently here so a bad scan setting can never
+  // stop the site from starting (Stage 3.1.1); parseScanConfig() validates
+  // them strictly and switches scanning off when anything is wrong. Server-only.
+  FEATURE_SCAN: z.string().optional(),
+  CRON_SECRET: z.string().optional(),
+  WORKER_DATABASE_URL: z.string().optional(),
+  WORKER_DATABASE_CA: z.string().optional(),
   NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: z
     .string()
     .refine(isPublishableKey, "must be a publishable (sb_publishable_) or anon key, never a secret/service key")
@@ -90,12 +91,6 @@ export const serverEnvSchema = publicEnvSchema.extend({
   for (const key of ["GOOGLE_GMAIL_CLIENT_ID", "GOOGLE_GMAIL_CLIENT_SECRET", "TOKEN_ENCRYPTION_KEY"] as const) {
     if (!env[key]) ctx.addIssue({ code: "custom", path: [key], message: "required when FEATURE_GMAIL=on" });
   }
-}).superRefine((env, ctx) => {
-  if (env.FEATURE_SCAN !== "on") return;
-  if (env.FEATURE_GMAIL !== "on") ctx.addIssue({ code: "custom", path: ["FEATURE_SCAN"], message: "needs FEATURE_GMAIL=on" });
-  for (const key of ["CRON_SECRET", "WORKER_DATABASE_URL"] as const) {
-    if (!env[key]) ctx.addIssue({ code: "custom", path: [key], message: "required when FEATURE_SCAN=on" });
-  }
 });
 
 export type ServerEnv = z.infer<typeof serverEnvSchema>;
@@ -111,7 +106,7 @@ export class EnvValidationError extends Error {
   }
 }
 
-function formatIssues(error: z.ZodError): string[] {
+export function formatIssues(error: z.ZodError): string[] {
   // Report variable names and the problem only, never the offending value.
   return error.issues.map((issue) => `${issue.path.join(".") || "(root)"}: ${issue.message}`);
 }

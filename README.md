@@ -102,6 +102,13 @@ Every variable is listed in [`.env.example`](.env.example) with placeholders onl
 
 - Off by default: `FEATURE_SCAN=off`, empty mailbox allowlist, worker login disabled. See [`docs/phases/phase-3.1.md`](docs/phases/phase-3.1.md).
 - End-to-end test on a synthetic mailbox (no Google, temporary local PostgreSQL): `bash scripts/scan-e2e-local.sh`.
+- Stage 3.1.1: a bad scan setting turns scanning off (logged as `scan_config_invalid`) instead of stopping the site; failures log `{"event":"scan_tick_error","stage":"…","code":"…"}` with no secrets or email data.
+
+## Search (Stage 3.2)
+
+- `/search`: employees search their **own** customer-linked email references by customer name, alias, domain or contact address, with customer, date, direction and mailbox filters and "Open in Gmail" links. Email subjects and content are not stored, so they are not searchable.
+- Admins also see counts per customer across all mailboxes (no individual emails, no per-mailbox split).
+- Migration `20261015000007_search.sql` adds functions and one index only. Details, dry run and rollback: [`docs/phases/phase-3.2.md`](docs/phases/phase-3.2.md).
 
 ## Hosted setup (at the Phase 1 review checkpoint, not before)
 

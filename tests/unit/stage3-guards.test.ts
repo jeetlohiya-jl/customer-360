@@ -25,12 +25,23 @@ describe("Stage 3 guards: no new permissions, scanning off by default", () => {
     expect(callers).toEqual(["lib/gmail/google.ts"]);
   });
 
-  it("the only background job is the scan route, and it does nothing unless FEATURE_SCAN=on", () => {
+  it("the only background job is the scan route, and it does nothing unless scanning is validly enabled", () => {
     const vercel = JSON.parse(readFileSync(join(root, "vercel.json"), "utf8"));
     expect(vercel.crons).toEqual([{ path: "/api/cron/scan", schedule: "* * * * *" }]);
     const route = readFileSync(join(root, "app/api/cron/scan/route.ts"), "utf8");
-    expect(route.indexOf('FEATURE_SCAN !== "on"')).toBeGreaterThan(-1);
-    expect(route.indexOf('FEATURE_SCAN !== "on"')).toBeLessThan(route.indexOf("runTick("));
+    expect(route.indexOf("if (!scan.enabled)")).toBeGreaterThan(-1);
+    expect(route.indexOf("if (!scan.enabled)")).toBeLessThan(route.indexOf("runTick("));
+    expect(route.indexOf("safeEqual(auth")).toBeLessThan(route.indexOf("runTick("));
+  });
+
+  it("the scan route never logs raw errors, messages or settings", () => {
+    const route = readFileSync(join(root, "app/api/cron/scan/route.ts"), "utf8");
+    const logs = route.match(/console\.(log|info|warn|error)\([^;]*;/g) ?? [];
+    expect(logs.length).toBeGreaterThan(0);
+    for (const l of logs) {
+      expect(l).not.toMatch(/\.message|\.stack|String\(e\)|workerDatabaseUrl|cronSecret|CRON_SECRET|WORKER_DATABASE/);
+      expect(l).not.toMatch(/console\.\w+\(e\)/);
+    }
   });
 
   it("the scan migration approves no mailbox and enables no worker login", () => {

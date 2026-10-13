@@ -4,7 +4,7 @@ import { loadGmailPanel, type GmailPanel } from "@/lib/gmail/connection";
 import { MAX_MESSAGES } from "@/lib/gmail/google";
 import { connectGmail, disconnectGmail } from "../gmail-actions";
 import { cancelScan, resumeScan, startScan } from "../scan-actions";
-import { getServerEnv } from "@/lib/env";
+import { getScanConfig } from "@/lib/scan/config";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import Link from "next/link";
 
@@ -64,7 +64,9 @@ export default async function DashboardPage({
 }) {
   const user = await requireUser();
   const { error, gmail, scan, scan_error } = await searchParams;
-  const scanOn = getServerEnv().FEATURE_SCAN === "on";
+  const scanConfig = getScanConfig();
+  const scanOn = scanConfig.enabled;
+  const scanMisconfigured = !scanConfig.enabled && scanConfig.reason === "misconfigured";
   const supabase = await createSupabaseServerClient();
   const { data: jobsData } = await supabase.rpc("my_scan_jobs");
   const jobs = (jobsData ?? []) as ScanJob[];
@@ -121,7 +123,7 @@ export default async function DashboardPage({
       {panel.state === "connected" || panel.state === "revoked" || jobs.length ? (
         <section className="section">
           <div className="section-num">03 · Customer email scan</div>
-          <ScanCard jobs={jobs} enabled={scanOn} />
+          <ScanCard jobs={jobs} enabled={scanOn} misconfigured={scanMisconfigured} />
         </section>
       ) : null}
 
@@ -243,7 +245,7 @@ function GmailCard({ panel }: { panel: GmailPanel }) {
 
 const fmtDay = new Intl.DateTimeFormat("en-GB", { dateStyle: "medium", timeStyle: "short", timeZone: "UTC" });
 
-function ScanCard({ jobs, enabled }: { jobs: ScanJob[]; enabled: boolean }) {
+function ScanCard({ jobs, enabled, misconfigured }: { jobs: ScanJob[]; enabled: boolean; misconfigured: boolean }) {
   const job = jobs[0];
   const active = job && ["queued", "running", "cancelling", "paused_auth"].includes(job.status);
   return (
@@ -273,7 +275,7 @@ function ScanCard({ jobs, enabled }: { jobs: ScanJob[]; enabled: boolean }) {
         </p>
       ) : null}
       <div className="card-actions">
-        {!enabled ? <span className="pill off">scanning off</span> : null}
+        {!enabled ? <span className="pill off">{misconfigured ? "scanning off: setting needs attention" : "scanning off"}</span> : null}
         {enabled && !active ? (
           <form action={startScan}><button type="submit" className="btn-primary">Scan my mailbox</button></form>
         ) : null}
@@ -284,6 +286,7 @@ function ScanCard({ jobs, enabled }: { jobs: ScanJob[]; enabled: boolean }) {
           <form action={resumeScan}><button type="submit" className="btn-secondary">Resume after reconnecting</button></form>
         ) : null}
         <Link href="/my-customers" className="small">My customer-linked emails</Link>
+        <Link href="/search" className="small">Search</Link>
       </div>
     </div>
   );

@@ -20,6 +20,9 @@ export default async function AppLayout({ children }: { children: React.ReactNod
           <Link href="/my-customers" className="navlink">
             My customer emails
           </Link>
+          <Link href="/search" className="navlink">
+            Search
+          </Link>
           {user.role === "admin" ? (
             <>
               <Link href="/customers" className="navlink">

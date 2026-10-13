@@ -14,6 +14,7 @@
 import { GmailError, type MessageHeaders } from "@/lib/gmail/google";
 import { buildIndex, type CustomerRecord } from "@/lib/customers/matcher";
 import { classifyMessage, EXCLUDE_LABEL_RE, parseAddresses, type LinkOut, type ReviewOut } from "./classify";
+import { errorCode, errorStage, inStage, StageError } from "./errors";
 
 export interface ClaimedJob {
   job_id: string;
@@ -120,19 +121,20 @@ const emptyCounts = (): PageCounts => ({
 
 export async function runTick(deps: TickDeps): Promise<TickResult> {
   const log = deps.log ?? (() => {});
-  await deps.db.retentionCleanup();
-  const job = await deps.db.claimJob(180);
+  await inStage("db_cleanup", () => deps.db.retentionCleanup());
+  const job = await inStage("db_claim", () => deps.db.claimJob(180));
   if (!job) return { status: "idle" };
 
   try {
-    const tok = await deps.db.jobToken(job.job_id);
+    const tok = await inStage("db_token", () => deps.db.jobToken(job.job_id));
     if (!tok) throw new AuthLost();
+    const refreshToken = await inStage("decrypt", () => deps.decrypt(tok.refresh_token_enc, tok.key_version, job.owner_id));
     let accessToken: string;
     try {
-      accessToken = await deps.gmail.accessToken(deps.decrypt(tok.refresh_token_enc, tok.key_version, job.owner_id));
+      accessToken = await deps.gmail.accessToken(refreshToken);
     } catch (e) {
       if (e instanceof GmailError && e.code === "revoked") throw new AuthLost();
-      throw e;
+      throw new StageError("gmail_auth", e);
     }
     const guard = async <T>(p: Promise<T>): Promise<T> => {
       try {
@@ -143,16 +145,16 @@ export async function runTick(deps: TickDeps): Promise<TickResult> {
       }
     };
 
-    const master = await deps.db.customerMaster();
+    const master = await inStage("db_master", () => deps.db.customerMaster());
     const index = buildIndex({
       customers: master.customers.map((c) => ({ id: c.id, canonicalName: c.canonical_name, status: c.status, names: c.names, domains: c.domains, emails: c.emails })),
       distinctions: master.distinctions,
       rejections: master.rejections,
       workspaceDomain: master.workspace_domain,
     });
-    const labels = await guard(deps.gmail.listLabels(accessToken));
+    const labels = await inStage("gmail_labels", () => guard(deps.gmail.listLabels(accessToken)));
     const excludeLabelIds = new Set(labels.filter((l) => EXCLUDE_LABEL_RE.test(l.name)).map((l) => l.id));
-    const page = await guard(deps.gmail.listIds(accessToken, job.page_token));
+    const page = await inStage("gmail_list", () => guard(deps.gmail.listIds(accessToken, job.page_token)));
 
     const counts = emptyCounts();
     counts.enumerated = page.messages.length;
@@ -193,7 +195,7 @@ export async function runTick(deps: TickDeps): Promise<TickResult> {
     });
 
     const pageNo = job.pages_done + 1;
-    const status = await deps.db.commitPage({
+    const status = await inStage("db_commit", () => deps.db.commitPage({
       jobId: job.job_id,
       pageNo,
       nextPageToken: page.nextPageToken,
@@ -202,18 +204,21 @@ export async function runTick(deps: TickDeps): Promise<TickResult> {
       reviews: [...reviews.values()],
       failures,
       done: page.nextPageToken === null,
-    });
+    }));
     log({ event: "scan_page_committed", status, pageNo, ...counts, links: links.length });
     return { status, jobId: job.job_id, pageNo, counts };
   } catch (e) {
-    if (e instanceof AuthLost) {
-      await deps.db.authLost(job.job_id);
+    const inner = e instanceof StageError ? e.cause : e;
+    if (inner instanceof AuthLost) {
+      await inStage("db_auth_lost", () => deps.db.authLost(job.job_id));
       log({ event: "scan_auth_lost" });
       return { status: "auth_lost", jobId: job.job_id };
     }
-    const code = e instanceof GmailError ? `${e.code}_${e.httpStatus ?? ""}` : e instanceof Error && e.name ? e.name.slice(0, 40) : "error";
-    const status = await deps.db.release(job.job_id, code);
-    log({ event: "scan_page_released", status, code });
+    // Safe code only: "<stage>:<code>", e.g. "gmail_list:gmail_quota_429".
+    const stage = errorStage(e);
+    const code = `${stage}:${errorCode(e)}`.slice(0, 64);
+    const status = await inStage("db_release", () => deps.db.release(job.job_id, code));
+    log({ event: "scan_page_released", status, stage, code });
     return { status: status === "failed" ? "failed" : "released", jobId: job.job_id, error: code };
   }
 }

@@ -1,5 +1,6 @@
 import { requireUser } from "@/lib/auth/session";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
+import { gmailMessageUrl } from "@/lib/search/params";
 
 type Link = {
   customer_id: string;
@@ -24,7 +25,7 @@ const fmt = new Intl.DateTimeFormat("en-GB", { dateStyle: "medium", timeZone: "U
 
 /** The signed-in employee's OWN customer-linked emails. Nobody else's are reachable here. */
 export default async function MyCustomersPage() {
-  await requireUser();
+  const user = await requireUser();
   const supabase = await createSupabaseServerClient();
   const { data } = await supabase.rpc("my_message_links", { p_customer: null, p_limit: 1000 });
   const links = (data ?? []) as Link[];
@@ -74,9 +75,13 @@ export default async function MyCustomersPage() {
                       <td className="small">{l.customer_addresses.join(", ") || "not stored"}</td>
                       <td className="small">{l.evidence.map((e) => `${EVIDENCE[e.type] ?? e.type}: ${e.value}`).join("; ")}</td>
                       <td>
-                        <a href={`https://mail.google.com/mail/u/0/#all/${encodeURIComponent(l.gmail_message_id)}`} target="_blank" rel="noreferrer">
-                          Gmail
-                        </a>
+                        {gmailMessageUrl(l.gmail_message_id, user.email) ? (
+                          <a href={gmailMessageUrl(l.gmail_message_id, user.email) ?? undefined} target="_blank" rel="noreferrer noopener">
+                            Gmail
+                          </a>
+                        ) : (
+                          "n/a"
+                        )}
                       </td>
                     </tr>
                   ))}

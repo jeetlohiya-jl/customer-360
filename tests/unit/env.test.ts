@@ -89,21 +89,12 @@ describe("parseServerEnv", () => {
     );
   });
 
-  it("scanning is off by default and needs Gmail, a cron secret and the worker login when on", () => {
-    expect(parseServerEnv(valid).FEATURE_SCAN).toBe("off");
-    expect(() => parseServerEnv({ ...valid, FEATURE_SCAN: "on" })).toThrow(/FEATURE_SCAN[\s\S]*CRON_SECRET[\s\S]*WORKER_DATABASE_URL/);
-    const gmailOn = {
-      ...valid,
-      FEATURE_GMAIL: "on",
-      GOOGLE_GMAIL_CLIENT_ID: "123-abc.apps.googleusercontent.com",
-      GOOGLE_GMAIL_CLIENT_SECRET: "synthetic-client-secret",
-      TOKEN_ENCRYPTION_KEY: Buffer.alloc(32, 7).toString("base64"),
-    };
-    expect(() => parseServerEnv({ ...gmailOn, FEATURE_SCAN: "on", CRON_SECRET: "short", WORKER_DATABASE_URL: "postgres://c360_worker:x@h/db" })).toThrow(/CRON_SECRET/);
-    expect(() =>
-      parseServerEnv({ ...gmailOn, FEATURE_SCAN: "on", CRON_SECRET: "x".repeat(40), WORKER_DATABASE_URL: "postgres://postgres:x@h/db" }),
-    ).toThrow(/WORKER_DATABASE_URL/);
-    expect(parseServerEnv({ ...gmailOn, FEATURE_SCAN: "on", CRON_SECRET: "x".repeat(40), WORKER_DATABASE_URL: "postgres://c360_worker.abcd:x@h:6543/postgres" }).FEATURE_SCAN).toBe("on");
+  it("scan settings never stop the app from starting (Stage 3.1.1)", () => {
+    // Previously these threw at boot and took the whole site down.
+    expect(() => parseServerEnv({ ...valid, FEATURE_SCAN: "on" })).not.toThrow();
+    expect(() => parseServerEnv({ ...valid, FEATURE_SCAN: "yes" })).not.toThrow();
+    expect(() => parseServerEnv({ ...valid, FEATURE_SCAN: "on", WORKER_DATABASE_CA: "not a cert", CRON_SECRET: "short" })).not.toThrow();
+    expect(() => parseServerEnv({ ...valid, WORKER_DATABASE_URL: "postgres://postgres:x@h/db" })).not.toThrow();
   });
 
   it("never echoes secret values in error messages", () => {

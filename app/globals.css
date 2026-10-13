@@ -226,7 +226,7 @@ select { font: inherit; font-size: 14px; padding: 6px 10px; border-radius: 8px; 
 .card > .small, .card > dl, .card > .fine { margin-top: 16px; }
 
 /* ---- Customer master (Stage 3.0) ---- */
-input[type="text"], input[type="search"], input[type="email"], input[type="file"], textarea {
+input[type="text"], input[type="search"], input[type="email"], input[type="file"], input[type="date"], textarea {
   font: inherit; font-size: 14px; padding: 8px 12px; border-radius: 8px; border: 1px solid var(--ink-15);
   background: var(--white); color: var(--ink); max-width: 100%;
 }
