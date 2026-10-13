@@ -7,6 +7,7 @@ import {
   buildAuthUrl,
   exchangeCode,
   getMailboxAddress,
+  gmailTokenContext,
   listRecentMessages,
   refreshAccessToken,
   revokeToken,
@@ -37,7 +38,7 @@ export function gmailEnv(): GmailEnv | null {
 }
 
 export const redirectUri = (env: ServerEnv) => `${env.APP_BASE_URL}/api/oauth/gmail/callback`;
-const tokenContext = (userId: string) => `gmail-refresh-token:${userId}`;
+const tokenContext = gmailTokenContext;
 
 interface OAuthCookie {
   s: string; // state

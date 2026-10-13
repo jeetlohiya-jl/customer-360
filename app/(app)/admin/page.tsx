@@ -15,10 +15,12 @@ export default async function AdminPage({
   const supabase = await createSupabaseServerClient();
 
   // Both reads are bounded and go through RLS (admins only).
-  const [{ data: users }, { data: audit }] = await Promise.all([
+  const [{ data: users }, { data: audit }, { data: scans }] = await Promise.all([
     supabase.from("app_users").select("id, email, role, status, created_at").order("email").limit(200),
     supabase.rpc("recent_audit", { max_rows: 50 }),
+    supabase.rpc("scan_jobs_overview"),
   ]);
+  type ScanRow = { mailbox_email: string; status: string; created_at: string; finished_at: string | null; enumerated: number; matched: number; in_review: number; unmatched: number; failed: number; excluded: number };
 
   return (
     <>
@@ -70,6 +72,45 @@ export default async function AdminPage({
           </tbody>
         </table>
         </div>
+      </section>
+
+      <section className="card section">
+        <span className="eyebrow">Mailbox scans · counts only</span>
+        <p className="small">Admins see how each scan is progressing, never which emails were linked.</p>
+        {((scans ?? []) as ScanRow[]).length === 0 ? (
+          <p className="small mt-16">No scans yet.</p>
+        ) : (
+          <div className="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Mailbox</th>
+                  <th>Status</th>
+                  <th>Examined</th>
+                  <th>Linked</th>
+                  <th>Review</th>
+                  <th>No customer</th>
+                  <th>Excluded</th>
+                  <th>Failed</th>
+                </tr>
+              </thead>
+              <tbody>
+                {((scans ?? []) as ScanRow[]).map((j) => (
+                  <tr key={`${j.mailbox_email}-${j.created_at}`}>
+                    <td>{j.mailbox_email}</td>
+                    <td>{j.status}</td>
+                    <td>{j.enumerated}</td>
+                    <td>{j.matched}</td>
+                    <td>{j.in_review}</td>
+                    <td>{j.unmatched}</td>
+                    <td>{j.excluded}</td>
+                    <td>{j.failed}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
       </section>
 
       <section className="card section">

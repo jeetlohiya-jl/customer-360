@@ -10,7 +10,7 @@ function files(dir: string): string[] {
   });
 }
 
-describe("Stage 3.0 guards: no Gmail scanning, no new permissions", () => {
+describe("Stage 3 guards: no new permissions, scanning off by default", () => {
   it("customer code never touches Gmail", () => {
     for (const f of [...files(join(root, "lib/customers")), ...files(join(root, "app/(app)/customers"))]) {
       const src = readFileSync(f, "utf8");
@@ -25,8 +25,28 @@ describe("Stage 3.0 guards: no Gmail scanning, no new permissions", () => {
     expect(callers).toEqual(["lib/gmail/google.ts"]);
   });
 
-  it("no background job or cron is configured yet", () => {
+  it("the only background job is the scan route, and it does nothing unless FEATURE_SCAN=on", () => {
     const vercel = JSON.parse(readFileSync(join(root, "vercel.json"), "utf8"));
-    expect(vercel.crons).toBeUndefined();
+    expect(vercel.crons).toEqual([{ path: "/api/cron/scan", schedule: "* * * * *" }]);
+    const route = readFileSync(join(root, "app/api/cron/scan/route.ts"), "utf8");
+    expect(route.indexOf('FEATURE_SCAN !== "on"')).toBeGreaterThan(-1);
+    expect(route.indexOf('FEATURE_SCAN !== "on"')).toBeLessThan(route.indexOf("runTick("));
+  });
+
+  it("the scan migration approves no mailbox and enables no worker login", () => {
+    const sql = readFileSync(join(root, "supabase/migrations/20261014000006_header_scan.sql"), "utf8")
+      .split("\n")
+      .filter((l) => !l.trim().startsWith("--"))
+      .join("\n");
+    expect(sql).toContain("values ('scan_allowed_mailboxes', '')");
+    expect(sql).toMatch(/create role c360_worker nologin/);
+    expect(sql).not.toMatch(/alter role c360_worker[^;]*\blogin\b[^;]*password\s+'/i);
+  });
+
+  it("Gmail permission is still gmail.metadata only", () => {
+    const google = readFileSync(join(root, "lib/gmail/google.ts"), "utf8");
+    expect(google.match(/https:\/\/www\.googleapis\.com\/auth\/gmail\.[a-z]+/g)).toEqual([
+      "https://www.googleapis.com/auth/gmail.metadata",
+    ]);
   });
 });

@@ -34,6 +34,10 @@ jobs:
       TOKEN_ENCRYPTION_KEY: Y2ktc2VudGluZWwta2V5LTMyLWJ5dGVzLWxvbmctISE=
       SUPABASE_SERVICE_ROLE_KEY: ci-sentinel-service-role-6c1d0b7f
       DATABASE_URL: postgres://ci-sentinel-user:ci-sentinel-pass-41aa@localhost:5432/none
+      # Scan on with sentinels so the bundle scan proves these never reach browsers.
+      FEATURE_SCAN: "on"
+      CRON_SECRET: ci-sentinel-cron-secret-5b7e9c1a2d4f6e8a0c
+      WORKER_DATABASE_URL: postgres://c360_worker:ci-sentinel-worker-pass-7d2e@localhost:5432/none
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -60,6 +64,20 @@ jobs:
       # Starts only the database container; no hosted project is involved.
       - run: supabase db start
       - run: supabase test db
+
+  scan-e2e:
+    name: Scan end-to-end (synthetic mailbox, temporary PostgreSQL)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      # The runner image ships PostgreSQL 16 binaries; no service or hosted project is used.
+      - run: PGBIN=/usr/lib/postgresql/16/bin bash scripts/scan-e2e-local.sh
 
   secrets:
     name: Secret scan (full history)

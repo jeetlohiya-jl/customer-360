@@ -12,4 +12,6 @@ regexes = [
   '''<supabase-publishable-or-anon-key>''',
   '''Y2ktc2VudGluZWwta2V5LTMyLWJ5dGVzLWxvbmctISE=''',
   '''ci-synthetic-client\.apps\.googleusercontent\.com''',
+  '''local-e2e-only''',
+  '''synthetic-refresh-token-not-real''',
 ]

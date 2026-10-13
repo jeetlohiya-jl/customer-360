@@ -98,6 +98,11 @@ Every variable is listed in [`.env.example`](.env.example) with placeholders onl
 - Migration `20261013000005_customer_master.sql`: review it, run `npx supabase@2.120.0 db push --dry-run`, apply only after approval.
 - Details: [`docs/phases/phase-3.0.md`](docs/phases/phase-3.0.md).
 
+## Header scan (Stage 3.1)
+
+- Off by default: `FEATURE_SCAN=off`, empty mailbox allowlist, worker login disabled. See [`docs/phases/phase-3.1.md`](docs/phases/phase-3.1.md).
+- End-to-end test on a synthetic mailbox (no Google, temporary local PostgreSQL): `bash scripts/scan-e2e-local.sh`.
+
 ## Hosted setup (at the Phase 1 review checkpoint, not before)
 
 Follow section 7 ("Final setup checklist") of the architecture plan: Supabase project in `us-east-1`, Google Cloud project with an **Internal** OAuth consent screen and a "Sign-in" OAuth client, Vercel project with function region `iad1`. Hosted migrations will run only through an approved GitHub Actions workflow in a later phase. **Do not run `supabase db push` against a hosted project.**

@@ -215,3 +215,77 @@ export async function listRecentMessages(
   );
   return { messages: full.map(summarize), elapsedMs: Date.now() - started };
 }
+
+// ---------------------------------------------------------------------------
+// Stage 3.1 header scan. Still gmail.metadata only: message IDs, labels and a
+// fixed list of headers. No bodies, snippets or attachments are requested.
+// ---------------------------------------------------------------------------
+
+export const SCAN_PAGE_SIZE = 250;
+export const SCAN_HEADERS = ["From", "To", "Cc", "Subject", "Date", "Sensitivity", "List-Unsubscribe"] as const;
+
+export interface MessageRef {
+  id: string;
+  threadId?: string;
+}
+
+export interface MessageHeaders {
+  id: string;
+  threadId?: string;
+  labelIds: string[];
+  internalDate: number;
+  headers: Record<string, string>;
+}
+
+/** One page of message IDs, newest first. Spam and trash are not included. */
+export async function listMessageIds(
+  accessToken: string,
+  pageToken: string | null,
+  fetchImpl: Fetch = fetch,
+): Promise<{ messages: MessageRef[]; nextPageToken: string | null }> {
+  const qs = new URLSearchParams({ maxResults: String(SCAN_PAGE_SIZE), includeSpamTrash: "false" });
+  if (pageToken) qs.set("pageToken", pageToken);
+  const r = await gmailGet<{ messages?: MessageRef[]; nextPageToken?: string }>(`/messages?${qs}`, accessToken, fetchImpl);
+  return { messages: r.messages ?? [], nextPageToken: r.nextPageToken ?? null };
+}
+
+/** Headers and labels of one message (format=metadata, named headers only). */
+export async function getMessageHeaders(accessToken: string, id: string, fetchImpl: Fetch = fetch): Promise<MessageHeaders> {
+  const qs = new URLSearchParams({ format: "metadata" });
+  for (const h of SCAN_HEADERS) qs.append("metadataHeaders", h);
+  const m = await gmailGet<GmailMessage & { threadId?: string; labelIds?: string[] }>(
+    `/messages/${encodeURIComponent(id)}?${qs}`,
+    accessToken,
+    fetchImpl,
+  );
+  const headers: Record<string, string> = {};
+  for (const h of m.payload?.headers ?? []) {
+    const key = h.name.toLowerCase();
+    if ((SCAN_HEADERS as readonly string[]).some((s) => s.toLowerCase() === key) && !(key in headers)) headers[key] = h.value;
+  }
+  return { id: m.id, threadId: m.threadId, labelIds: m.labelIds ?? [], internalDate: Number(m.internalDate ?? 0), headers };
+}
+
+/** Label names and IDs (to honour an employee's own exclude label). */
+export async function listLabels(accessToken: string, fetchImpl: Fetch = fetch): Promise<{ id: string; name: string }[]> {
+  const r = await gmailGet<{ labels?: { id: string; name: string }[] }>("/labels", accessToken, fetchImpl);
+  return r.labels ?? [];
+}
+
+/** Retries rate limits and server errors with exponential backoff. Never retries a revoked token. */
+export async function withRetry<T>(fn: () => Promise<T>, opts: { tries?: number; baseMs?: number; sleep?: (ms: number) => Promise<void> } = {}): Promise<T> {
+  const tries = opts.tries ?? 3;
+  const sleep = opts.sleep ?? ((ms: number) => new Promise((r) => setTimeout(r, ms)));
+  for (let attempt = 1; ; attempt++) {
+    try {
+      return await fn();
+    } catch (e) {
+      const retryable = e instanceof GmailError && e.code === "gmail_api_error" && (e.httpStatus === 429 || (e.httpStatus ?? 0) >= 500);
+      if (!retryable || attempt >= tries) throw e;
+      await sleep((opts.baseMs ?? 500) * 2 ** (attempt - 1));
+    }
+  }
+}
+
+/** Associated data that binds an encrypted refresh token to its owner. */
+export const gmailTokenContext = (userId: string) => `gmail-refresh-token:${userId}`;

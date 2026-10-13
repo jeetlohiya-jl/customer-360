@@ -65,6 +65,15 @@ export const serverEnvSchema = publicEnvSchema.extend({
   GOOGLE_GMAIL_CLIENT_SECRET: z.string().min(10).optional(),
   TOKEN_ENCRYPTION_KEY: base64Key32.optional(),
   TOKEN_ENCRYPTION_KEY_VERSION: z.coerce.number().int().min(1).max(32767).default(1),
+  // Stage 3.1 header scan. Off unless explicitly "on"; then the cron secret and
+  // the worker's own database login are required. Server-only.
+  FEATURE_SCAN: z.enum(["on", "off"], { error: "FEATURE_SCAN must be 'on' or 'off'" }).default("off"),
+  CRON_SECRET: z.string().min(32, "must be at least 32 random characters").optional(),
+  WORKER_DATABASE_URL: z
+    .string()
+    .regex(/^postgres(ql)?:\/\/c360_worker[.:]/, "must be a postgres:// URL for the c360_worker login")
+    .optional(),
+  WORKER_DATABASE_CA: z.string().includes("BEGIN CERTIFICATE", { message: "must be a PEM certificate" }).optional(),
   NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: z
     .string()
     .refine(isPublishableKey, "must be a publishable (sb_publishable_) or anon key, never a secret/service key")
@@ -80,6 +89,12 @@ export const serverEnvSchema = publicEnvSchema.extend({
   if (env.FEATURE_GMAIL !== "on") return;
   for (const key of ["GOOGLE_GMAIL_CLIENT_ID", "GOOGLE_GMAIL_CLIENT_SECRET", "TOKEN_ENCRYPTION_KEY"] as const) {
     if (!env[key]) ctx.addIssue({ code: "custom", path: [key], message: "required when FEATURE_GMAIL=on" });
+  }
+}).superRefine((env, ctx) => {
+  if (env.FEATURE_SCAN !== "on") return;
+  if (env.FEATURE_GMAIL !== "on") ctx.addIssue({ code: "custom", path: ["FEATURE_SCAN"], message: "needs FEATURE_GMAIL=on" });
+  for (const key of ["CRON_SECRET", "WORKER_DATABASE_URL"] as const) {
+    if (!env[key]) ctx.addIssue({ code: "custom", path: [key], message: "required when FEATURE_SCAN=on" });
   }
 });
 

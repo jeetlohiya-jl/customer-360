@@ -89,6 +89,23 @@ describe("parseServerEnv", () => {
     );
   });
 
+  it("scanning is off by default and needs Gmail, a cron secret and the worker login when on", () => {
+    expect(parseServerEnv(valid).FEATURE_SCAN).toBe("off");
+    expect(() => parseServerEnv({ ...valid, FEATURE_SCAN: "on" })).toThrow(/FEATURE_SCAN[\s\S]*CRON_SECRET[\s\S]*WORKER_DATABASE_URL/);
+    const gmailOn = {
+      ...valid,
+      FEATURE_GMAIL: "on",
+      GOOGLE_GMAIL_CLIENT_ID: "123-abc.apps.googleusercontent.com",
+      GOOGLE_GMAIL_CLIENT_SECRET: "synthetic-client-secret",
+      TOKEN_ENCRYPTION_KEY: Buffer.alloc(32, 7).toString("base64"),
+    };
+    expect(() => parseServerEnv({ ...gmailOn, FEATURE_SCAN: "on", CRON_SECRET: "short", WORKER_DATABASE_URL: "postgres://c360_worker:x@h/db" })).toThrow(/CRON_SECRET/);
+    expect(() =>
+      parseServerEnv({ ...gmailOn, FEATURE_SCAN: "on", CRON_SECRET: "x".repeat(40), WORKER_DATABASE_URL: "postgres://postgres:x@h/db" }),
+    ).toThrow(/WORKER_DATABASE_URL/);
+    expect(parseServerEnv({ ...gmailOn, FEATURE_SCAN: "on", CRON_SECRET: "x".repeat(40), WORKER_DATABASE_URL: "postgres://c360_worker.abcd:x@h:6543/postgres" }).FEATURE_SCAN).toBe("on");
+  });
+
   it("never echoes secret values in error messages", () => {
     const secret = "sentinel-super-secret-value-should-not-appear";
     try {

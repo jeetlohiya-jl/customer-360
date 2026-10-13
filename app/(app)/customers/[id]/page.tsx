@@ -140,7 +140,7 @@ export default async function CustomerPage({
             <input type="hidden" name="status" value={customer.status === "active" ? "inactive" : "active"} />
             <button type="submit" className="btn-secondary">{customer.status === "active" ? "Mark inactive" : "Mark active"}</button>
           </form>
-          <p className="fine">Customers are never deleted. Every change here is recorded in the audit log.</p>
+          <p className="fine">Customers are never deleted. Marking a customer inactive also removes its stored email links (they return if a later scan runs after reactivation). Every change is recorded in the audit log.</p>
         </div>
       </div>
     </>
