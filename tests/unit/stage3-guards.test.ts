@@ -1,4 +1,4 @@
-import { readdirSync, readFileSync, statSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join, relative } from "node:path";
 import { describe, expect, it } from "vitest";
 
@@ -101,13 +101,18 @@ describe("Stage 3 guards: no new permissions, scanning off by default", () => {
     }
   });
 
-  it("the extraction migration is pending: supabase db push cannot apply it", () => {
-    expect(readdirSync(join(root, "supabase/migrations")).some((f) => f.includes("fact_extraction"))).toBe(false);
-    expect(readdirSync(join(root, "supabase/tests")).some((f) => f.includes("fact_extraction"))).toBe(false);
+  // 0008 lives in supabase/pending until it is approved, then moves (with its tests) to
+  // supabase/migrations and supabase/tests. Either way it must sit with its tests.
+  const m8 = ["supabase/migrations", "supabase/pending"].map((d) => join(root, d, "20261016000008_fact_extraction.sql")).find((p) => existsSync(p));
+
+  it("the extraction migration and its tests are kept together (pending or applied)", () => {
+    expect(m8).toBeDefined();
+    const applied = m8!.replace(/\\/g, "/").includes("supabase/migrations/");
+    expect(existsSync(join(root, applied ? "supabase/tests" : "supabase/pending/tests", "008_fact_extraction.test.sql"))).toBe(true);
   });
 
   it("the extraction migration enables nothing by default", () => {
-    const sql = readFileSync(join(root, "supabase/pending/20261016000008_fact_extraction.sql"), "utf8");
+    const sql = readFileSync(m8!, "utf8");
     expect(sql).toContain("('extract_allowed_mailboxes', '')");
     expect(sql).toContain("('facts_visibility', 'reviewers')");
     expect(sql).toContain("('facts_show_source_owner', 'off')");
