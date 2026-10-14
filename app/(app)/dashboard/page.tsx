@@ -1,7 +1,7 @@
 import { requireUser } from "@/lib/auth/session";
 import { PHASE, PHASE_LABEL, featureSummary } from "@/lib/features";
 import { loadGmailPanel, type GmailPanel } from "@/lib/gmail/connection";
-import { MAX_MESSAGES } from "@/lib/gmail/google";
+import { GMAIL_READONLY_SCOPE, MAX_MESSAGES } from "@/lib/gmail/google";
 import { connectGmail, disconnectGmail } from "../gmail-actions";
 import { cancelScan, resumeScan, startScan } from "../scan-actions";
 import { getScanConfig } from "@/lib/scan/config";
@@ -259,7 +259,11 @@ function GmailCard({ panel }: { panel: GmailPanel }) {
         <dt>Since</dt>
         <dd>{when(panel.connectedAt)}</dd>
         <dt>Permission</dt>
-        <dd>gmail.metadata (read-only headers)</dd>
+        <dd>
+          {panel.scopes.includes(GMAIL_READONLY_SCOPE)
+            ? "gmail.readonly (read-only, includes email content)"
+            : "gmail.metadata (read-only headers)"}
+        </dd>
       </dl>
       {disconnectForm}
     </div>

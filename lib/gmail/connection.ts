@@ -179,6 +179,8 @@ export type GmailPanel =
       state: "connected";
       mailbox: string;
       connectedAt: string;
+      /** Gmail permissions this connection holds (from the database). */
+      scopes: string[];
       messages: MessageSummary[];
       elapsedMs: number;
       fetchedAt: string;
@@ -199,7 +201,7 @@ export async function loadGmailPanel(user: CurrentUser): Promise<GmailPanel> {
 
   const supabase = await createSupabaseServerClient();
   const { data } = await supabase.rpc("my_gmail_connection");
-  const conn = (data as { mailbox_email: string; status: string; connected_at: string }[] | null)?.[0];
+  const conn = (data as { mailbox_email: string; status: string; connected_at: string; scopes: string[] | null }[] | null)?.[0];
   if (!conn) return { state: "not_connected" };
   if (conn.status === "revoked") return { state: "revoked", mailbox: conn.mailbox_email };
 
@@ -217,6 +219,7 @@ export async function loadGmailPanel(user: CurrentUser): Promise<GmailPanel> {
       state: "connected",
       mailbox: conn.mailbox_email,
       connectedAt: conn.connected_at,
+      scopes: conn.scopes ?? [],
       messages,
       elapsedMs,
       fetchedAt: new Date().toISOString(),
