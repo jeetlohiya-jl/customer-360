@@ -33,11 +33,11 @@ describe("Gmail access is narrow and contained", () => {
     expect(users.map((f) => relative(ROOT, f).replace(/\\/g, "/"))).toEqual(["lib/gmail/google.ts"]);
   });
 
-  it("the only Gmail permission ever requested is gmail.metadata (no bodies, read-only)", () => {
+  it("Gmail permissions are read-only: gmail.metadata by default, gmail.readonly only behind GMAIL_CONTENT_ACCESS=on", () => {
     expect(GMAIL_SCOPE).toBe("https://www.googleapis.com/auth/gmail.metadata");
     const src = readFileSync(join(ROOT, "lib", "gmail", "google.ts"), "utf8");
     const scopes = src.match(/googleapis\.com\/auth\/[a-z.]+/g) ?? [];
-    expect([...new Set(scopes)]).toEqual(["googleapis.com/auth/gmail.metadata"]);
+    expect([...new Set(scopes)]).toEqual(["googleapis.com/auth/gmail.metadata", "googleapis.com/auth/gmail.readonly"]);
   });
 
   it("Slack stays disabled", () => {

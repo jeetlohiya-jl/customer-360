@@ -5,6 +5,7 @@ import { MAX_MESSAGES } from "@/lib/gmail/google";
 import { connectGmail, disconnectGmail } from "../gmail-actions";
 import { cancelScan, resumeScan, startScan } from "../scan-actions";
 import { getScanConfig } from "@/lib/scan/config";
+import { getExtractConfig } from "@/lib/extract/config";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import Link from "next/link";
 
@@ -70,6 +71,9 @@ export default async function DashboardPage({
   const supabase = await createSupabaseServerClient();
   const { data: jobsData } = await supabase.rpc("my_scan_jobs");
   const jobs = (jobsData ?? []) as ScanJob[];
+  const extractOn = getExtractConfig().enabled;
+  const { data: exData } = extractOn ? await supabase.rpc("my_extraction_status") : { data: null };
+  const ex = ((exData ?? []) as { pending: number; extracted: number; skipped: number; failed: number; needs_reconnect: number; facts: number; facts_needs_review: number }[])[0];
   const features = featureSummary();
   const panel = await loadGmailPanel(user);
   const notice = gmail ? NOTICES[gmail] : undefined;
@@ -124,6 +128,25 @@ export default async function DashboardPage({
         <section className="section">
           <div className="section-num">03 · Customer email scan</div>
           <ScanCard jobs={jobs} enabled={scanOn} misconfigured={scanMisconfigured} />
+        </section>
+      ) : null}
+
+      {extractOn && ex ? (
+        <section className="section">
+          <div className="section-num">04 · Customer facts from your mailbox</div>
+          <div className="card">
+            <span className="eyebrow">AI extraction · your mailbox only</span>
+            <div className="stats mt-16">
+              <span className="stat"><strong>{ex.extracted}</strong>emails processed</span>
+              <span className="stat"><strong>{ex.pending}</strong>waiting</span>
+              <span className="stat"><strong>{ex.skipped}</strong>skipped</span>
+              <span className="stat"><strong>{ex.failed}</strong>failed</span>
+              <span className="stat"><strong>{ex.facts}</strong>facts</span>
+              <span className="stat"><strong>{ex.facts_needs_review}</strong>to review</span>
+            </div>
+            {ex.needs_reconnect ? <p className="small">{ex.needs_reconnect} emails wait until you reconnect Gmail with content access.</p> : null}
+            <div className="card-actions"><Link href="/facts" className="small">Open customer facts</Link></div>
+          </div>
         </section>
       ) : null}
 

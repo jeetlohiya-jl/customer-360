@@ -26,6 +26,13 @@ export type ScanStage =
   | "db_commit"
   | "db_auth_lost"
   | "db_release"
+  // Stage B + C extraction (lib/extract/run.ts)
+  | "gmail_get"
+  | "db_context"
+  | "db_skip"
+  | "db_reserve"
+  | "model"
+  | "db_settle"
   | "unknown";
 
 /** Wraps an error with the step it happened in. The cause is kept for code only. */

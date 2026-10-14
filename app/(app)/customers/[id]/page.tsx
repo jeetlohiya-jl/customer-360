@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import { z } from "zod";
 import { requireAdmin } from "@/lib/auth/session";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
+import { getExtractConfig } from "@/lib/extract/config";
 import { addAlias, addIdentifier, removeAlias, removeIdentifier, setStatus, unmarkDistinct } from "../actions";
 
 const OK: Record<string, string> = {
@@ -48,6 +49,9 @@ export default async function CustomerPage({
         </span>
         <h1 className="h1">{customer.canonical_name}</h1>
         {customer.notes ? <p className="lead">{customer.notes}</p> : null}
+        {getExtractConfig().enabled ? (
+          <p className="small"><Link href={`/facts?customer=${customer.id}`}>Customer facts for {customer.canonical_name}</Link></p>
+        ) : null}
       </div>
 
       {ok && OK[ok] ? <p className="notice">{OK[ok]}</p> : null}

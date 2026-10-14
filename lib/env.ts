@@ -75,6 +75,11 @@ export const serverEnvSchema = publicEnvSchema.extend({
   CRON_SECRET: z.string().optional(),
   WORKER_DATABASE_URL: z.string().optional(),
   WORKER_DATABASE_CA: z.string().optional(),
+  // Stage B + C extraction (lenient here; validated fail-safe in lib/extract/config.ts). Server-only.
+  FEATURE_EXTRACT: z.string().optional(),
+  // "on" requests gmail.readonly instead of gmail.metadata (approval step). Anything else: header-only.
+  GMAIL_CONTENT_ACCESS: z.string().optional(),
+  ANTHROPIC_API_KEY: z.string().optional(),
   NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: z
     .string()
     .refine(isPublishableKey, "must be a publishable (sb_publishable_) or anon key, never a secret/service key")

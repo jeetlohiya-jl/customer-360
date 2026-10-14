@@ -38,6 +38,9 @@ jobs:
       FEATURE_SCAN: "on"
       CRON_SECRET: ci-sentinel-cron-secret-5b7e9c1a2d4f6e8a0c
       WORKER_DATABASE_URL: postgres://c360_worker:ci-sentinel-worker-pass-7d2e@localhost:5432/none
+      # Extraction stays off; the key sentinel proves it never reaches browsers.
+      FEATURE_EXTRACT: "off"
+      ANTHROPIC_API_KEY: ci-sentinel-anthropic-key-7a1b2c3d4e5f
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -65,8 +68,18 @@ jobs:
       - run: supabase db start
       - run: supabase test db
 
+  database-all:
+    name: All migrations incl. pending 0008 - pgTAP, rollback and re-apply (temporary PostgreSQL)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      # pgTAP for the runner's PostgreSQL 16; no service or hosted project is used.
+      - run: sudo apt-get update && sudo apt-get install -y postgresql-16-pgtap libtap-parser-sourcehandler-pgtap-perl
+      - run: PGBIN=/usr/lib/postgresql/16/bin bash scripts/db-test-local.sh
+
   scan-e2e:
-    name: Scan end-to-end (synthetic mailbox, temporary PostgreSQL)
+    name: End-to-end - scan, extraction, full pipeline (synthetic mailbox, temporary PostgreSQL)
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:

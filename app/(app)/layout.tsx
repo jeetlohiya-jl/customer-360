@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { requireUser } from "@/lib/auth/session";
 import { signOut } from "./actions";
+import { getExtractConfig } from "@/lib/extract/config";
 
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
   const user = await requireUser();
@@ -23,6 +24,11 @@ export default async function AppLayout({ children }: { children: React.ReactNod
           <Link href="/search" className="navlink">
             Search
           </Link>
+          {getExtractConfig().enabled ? (
+            <Link href="/facts" className="navlink">
+              Customer facts
+            </Link>
+          ) : null}
           {user.role === "admin" ? (
             <>
               <Link href="/customers" className="navlink">

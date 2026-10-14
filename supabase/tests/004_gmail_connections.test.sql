@@ -31,8 +31,8 @@ select throws_ok(
   '42501', null, 'user cannot attach someone else''s mailbox');
 select throws_ok(
   $$ select public.connect_gmail('t4.alice@gocirkla.com', 'v1.iv.ct.tag', 1::smallint,
-       array['https://www.googleapis.com/auth/gmail.readonly']) $$,
-  '22023', null, 'connection without gmail.metadata is rejected');
+       array['https://www.googleapis.com/auth/gmail.send']) $$,
+  '22023', null, 'connection without an accepted Gmail scope is rejected');
 select is((select mailbox_email from public.my_gmail_connection()), 't4.alice@gocirkla.com', 'Alice sees her connection');
 select is((select count(*)::int from public.my_gmail_token()), 1, 'Alice can fetch her own encrypted token');
 select throws_ok($$ select * from private.gmail_connections $$, '42501', null, 'direct table read is denied');

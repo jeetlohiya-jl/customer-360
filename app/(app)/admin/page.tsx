@@ -1,6 +1,8 @@
 import { requireAdmin } from "@/lib/auth/session";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { changeRole } from "../actions";
+import { getExtractConfig } from "@/lib/extract/config";
+import { retryFailedExtraction } from "../facts/actions";
 
 type UserRow = { id: string; email: string; role: string; status: string; created_at: string };
 type AuditRow = { id: number; at: string; action: string; target: string | null; actor_email: string | null };
@@ -20,6 +22,12 @@ export default async function AdminPage({
     supabase.rpc("recent_audit", { max_rows: 50 }),
     supabase.rpc("scan_jobs_overview"),
   ]);
+  const extractOn = getExtractConfig().enabled;
+  const { data: extraction } = extractOn ? await supabase.rpc("extraction_overview") : { data: null };
+  const { data: failuresData } = extractOn ? await supabase.rpc("extraction_failures") : { data: null };
+  const failures = (failuresData ?? []) as { code: string; failed: number; retrying: number }[];
+  type ExtractRow = { month: string; cap_usd: number; spent_usd: number; reserved_usd: number; paused: boolean; pending: number; extracted: number; skipped: number; failed: number; needs_reconnect: number; facts_auto: number; facts_needs_review: number; facts_reviewed: number };
+  const ex = ((extraction ?? []) as ExtractRow[])[0];
   type ScanRow = { mailbox_email: string; status: string; created_at: string; finished_at: string | null; enumerated: number; matched: number; in_review: number; unmatched: number; failed: number; excluded: number };
 
   return (
@@ -112,6 +120,32 @@ export default async function AdminPage({
           </div>
         )}
       </section>
+
+      {extractOn && ex ? (
+        <section className="card section">
+          <span className="eyebrow">Fact extraction · counts only</span>
+          <div className="stats mt-16">
+            <span className="stat"><strong>${Number(ex.spent_usd).toFixed(2)}</strong>of ${Number(ex.cap_usd).toFixed(0)} this month{ex.paused ? " (paused)" : ""}</span>
+            <span className="stat"><strong>{ex.extracted}</strong>emails processed</span>
+            <span className="stat"><strong>{ex.pending}</strong>waiting</span>
+            <span className="stat"><strong>{ex.skipped}</strong>skipped</span>
+            <span className="stat"><strong>{ex.failed}</strong>failed</span>
+            <span className="stat"><strong>{ex.needs_reconnect}</strong>need reconnect</span>
+            <span className="stat"><strong>{ex.facts_needs_review}</strong>facts to review</span>
+          </div>
+          {failures.length ? (
+            <div className="table-wrap mt-16">
+              <table>
+                <thead><tr><th>Error code</th><th>Failed</th><th>Retrying</th></tr></thead>
+                <tbody>{failures.map((x) => <tr key={x.code}><td><code>{x.code}</code></td><td>{x.failed}</td><td>{x.retrying}</td></tr>)}</tbody>
+              </table>
+            </div>
+          ) : null}
+          {ex.failed ? (
+            <form action={retryFailedExtraction} className="card-actions"><button type="submit" className="btn-secondary">Retry failed emails</button></form>
+          ) : null}
+        </section>
+      ) : null}
 
       <section className="card section">
         <span className="eyebrow">02 · Recent audit events</span>

@@ -150,3 +150,20 @@ describe("Gmail API reads", () => {
     expect(long.subject.length).toBe(200);
   });
 });
+
+describe("Stage B content permission (only when GMAIL_CONTENT_ACCESS=on)", () => {
+  const READONLY = "https://www.googleapis.com/auth/gmail.readonly";
+  const opts = { code: "c", codeVerifier: "v", clientId: "id", clientSecret: "s", redirectUri: "https://x.example/cb" };
+
+  it("asks for gmail.readonly ALONE when told to (with metadata too, Google would limit the token)", () => {
+    const u = new URL(buildAuthUrl({ clientId: "1.apps.googleusercontent.com", redirectUri: "https://x.example/cb", state: "s", codeVerifier: "v", loginHint: "a@gocirkla.com", hostedDomain: "gocirkla.com", scope: READONLY }));
+    expect(u.searchParams.get("scope")).toBe(READONLY);
+  });
+
+  it("requires the permission that was asked for", async () => {
+    const ok = (async () => json(200, { access_token: "at", refresh_token: "rt", scope: READONLY })) as unknown as typeof fetch;
+    await expect(exchangeCode({ ...opts, expectedScope: READONLY }, ok)).resolves.toMatchObject({ scopes: [READONLY] });
+    const meta = (async () => json(200, { access_token: "at", refresh_token: "rt", scope: GMAIL_SCOPE })) as unknown as typeof fetch;
+    await expect(exchangeCode({ ...opts, expectedScope: READONLY }, meta)).rejects.toMatchObject({ code: "scope_not_granted" });
+  });
+});

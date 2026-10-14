@@ -10,5 +10,5 @@ export default defineConfig({
       "server-only": fileURLToPath(new URL("./tests/stubs/server-only.ts", import.meta.url)),
     },
   },
-  test: { environment: "node", include: ["tests/e2e/**/*.e2e.test.ts"], testTimeout: 60_000 },
+  test: { environment: "node", include: ["tests/e2e/**/*.e2e.test.ts"], testTimeout: 60_000, fileParallelism: false },
 });

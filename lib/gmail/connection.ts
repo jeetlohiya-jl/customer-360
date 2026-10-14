@@ -4,6 +4,8 @@ import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { decryptSecret, encryptSecret, randomToken, signValue, verifySignedValue, safeEqual } from "@/lib/security/crypto";
 import {
   GmailError,
+  GMAIL_READONLY_SCOPE,
+  GMAIL_SCOPE,
   buildAuthUrl,
   exchangeCode,
   getMailboxAddress,
@@ -30,6 +32,14 @@ type GmailEnv = ServerEnv & {
   GOOGLE_GMAIL_CLIENT_SECRET: string;
   TOKEN_ENCRYPTION_KEY: string;
 };
+
+/**
+ * The Gmail permission to request. gmail.readonly only when GMAIL_CONTENT_ACCESS
+ * is exactly "on" (approval step); anything else keeps header-only access.
+ */
+export function requestedScope(env: { GMAIL_CONTENT_ACCESS?: string }): typeof GMAIL_SCOPE | typeof GMAIL_READONLY_SCOPE {
+  return env.GMAIL_CONTENT_ACCESS === "on" ? GMAIL_READONLY_SCOPE : GMAIL_SCOPE;
+}
 
 export function gmailEnv(): GmailEnv | null {
   const env = getServerEnv();
@@ -58,6 +68,7 @@ export function beginAuthorization(user: CurrentUser, env: GmailEnv) {
       codeVerifier: payload.v,
       loginHint: user.email,
       hostedDomain: env.WORKSPACE_DOMAIN,
+      scope: requestedScope(env),
     }),
     cookie: {
       name: OAUTH_COOKIE,
@@ -120,6 +131,7 @@ export async function completeAuthorization(
       clientId: env.GOOGLE_GMAIL_CLIENT_ID,
       clientSecret: env.GOOGLE_GMAIL_CLIENT_SECRET,
       redirectUri: redirectUri(env),
+      expectedScope: requestedScope(env),
     });
   } catch (e) {
     if (e instanceof GmailError && (e.code === "no_refresh_token" || e.code === "scope_not_granted")) return e.code;

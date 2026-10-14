@@ -35,12 +35,18 @@ for f in "$ROOT"/supabase/migrations/*.sql; do
   echo "    $(basename "$f")"
   "${PSQL[@]}" -d c360_test -f "$f"
 done
+# Pending (unapproved) migrations: local test database only, never hosted.
+for f in "$ROOT"/supabase/pending/*.sql; do
+  [ -e "$f" ] || continue
+  echo "    $(basename "$f") (pending)"
+  "${PSQL[@]}" -d c360_test -f "$f"
+done
 
 echo "==> Loading synthetic seed (as supabase db start/reset does)"
 "${PSQL[@]}" -d c360_test -f "$ROOT/supabase/seed.sql" >/dev/null
 
 echo "==> Running pgTAP tests"
-pg_prove -h "$WORK" -p "$PORT" -U postgres -d c360_test "$ROOT"/supabase/tests/*.sql
+pg_prove -h "$WORK" -p "$PORT" -U postgres -d c360_test "$ROOT"/supabase/tests/*.sql $(ls "$ROOT"/supabase/pending/tests/*.sql 2>/dev/null)
 
 if [[ "${CHECK_ROLLBACK:-1}" == "1" ]]; then
   echo "==> Checking reverse migrations and re-apply"
@@ -48,9 +54,9 @@ if [[ "${CHECK_ROLLBACK:-1}" == "1" ]]; then
     echo "    $(basename "$f")"
     "${PSQL[@]}" -d c360_test -f "$f"
   done
-  for f in "$ROOT"/supabase/migrations/*.sql; do
+  for f in "$ROOT"/supabase/migrations/*.sql $(ls "$ROOT"/supabase/pending/*.sql 2>/dev/null); do
     "${PSQL[@]}" -d c360_test -f "$f"
   done
-  pg_prove -h "$WORK" -p "$PORT" -U postgres -d c360_test "$ROOT"/supabase/tests/*.sql >/dev/null
+  pg_prove -h "$WORK" -p "$PORT" -U postgres -d c360_test "$ROOT"/supabase/tests/*.sql $(ls "$ROOT"/supabase/pending/tests/*.sql 2>/dev/null) >/dev/null
   echo "    rollback + re-apply OK, tests still pass"
 fi

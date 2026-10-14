@@ -110,6 +110,11 @@ Every variable is listed in [`.env.example`](.env.example) with placeholders onl
 - Admins also see counts per customer across all mailboxes (no individual emails, no per-mailbox split).
 - Migration `20261015000007_search.sql` adds functions and one index only. Details, dry run and rollback: [`docs/phases/phase-3.2.md`](docs/phases/phase-3.2.md).
 
+## Customer facts (Stage B + C): built, OFF
+
+- AI fact extraction from customer-linked emails. Disabled: `FEATURE_EXTRACT=off`, no cron entry, Gmail permission unchanged (`gmail.metadata`), migration 0008 kept in `supabase/pending/` so `db push` cannot apply it.
+- Tested on synthetic emails only. Details, guarantees and enabling steps: [`docs/phases/stage-bc.md`](docs/phases/stage-bc.md).
+
 ## Hosted setup (at the Phase 1 review checkpoint, not before)
 
 Follow section 7 ("Final setup checklist") of the architecture plan: Supabase project in `us-east-1`, Google Cloud project with an **Internal** OAuth consent screen and a "Sign-in" OAuth client, Vercel project with function region `iad1`. Hosted migrations will run only through an approved GitHub Actions workflow in a later phase. **Do not run `supabase db push` against a hosted project.**

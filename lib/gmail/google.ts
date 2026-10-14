@@ -1,8 +1,10 @@
 /**
  * Google OAuth + Gmail API calls for the Gmail connection proof of concept.
  *
- * - The ONLY Gmail permission ever requested is gmail.metadata (headers and
- *   labels; never message bodies). See GMAIL_SCOPE.
+ * - The default Gmail permission is gmail.metadata (headers and labels; never
+ *   message bodies). See GMAIL_SCOPE. gmail.readonly (Stage B content access)
+ *   is requested ONLY when GMAIL_CONTENT_ACCESS=on (off by default; turning it
+ *   on is an approval step). See requestedScope() in connection.ts.
  * - Authorization-code flow with PKCE (S256) and a state value.
  * - access_type=offline + prompt=consent so Google returns a refresh token on
  *   every connect (needed to fetch again later and to prove revocation).
@@ -12,6 +14,8 @@
 import { createHash } from "node:crypto";
 
 export const GMAIL_SCOPE = "https://www.googleapis.com/auth/gmail.metadata";
+/** Stage B only, behind GMAIL_CONTENT_ACCESS=on. Requested alone: with gmail.metadata also present, Google limits the token to metadata. */
+export const GMAIL_READONLY_SCOPE = "https://www.googleapis.com/auth/gmail.readonly";
 const AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth";
 const TOKEN_URL = "https://oauth2.googleapis.com/token";
 const REVOKE_URL = "https://oauth2.googleapis.com/revoke";
@@ -66,12 +70,13 @@ export function buildAuthUrl(opts: {
   codeVerifier: string;
   loginHint: string;
   hostedDomain: string;
+  scope?: typeof GMAIL_SCOPE | typeof GMAIL_READONLY_SCOPE;
 }): string {
   const u = new URL(AUTH_URL);
   u.searchParams.set("client_id", opts.clientId);
   u.searchParams.set("redirect_uri", opts.redirectUri);
   u.searchParams.set("response_type", "code");
-  u.searchParams.set("scope", GMAIL_SCOPE);
+  u.searchParams.set("scope", opts.scope ?? GMAIL_SCOPE);
   u.searchParams.set("access_type", "offline");
   u.searchParams.set("prompt", "consent");
   u.searchParams.set("include_granted_scopes", "false");
@@ -90,7 +95,7 @@ export interface TokenSet {
 }
 
 export async function exchangeCode(
-  opts: { code: string; codeVerifier: string; clientId: string; clientSecret: string; redirectUri: string },
+  opts: { code: string; codeVerifier: string; clientId: string; clientSecret: string; redirectUri: string; expectedScope?: string },
   fetchImpl: Fetch = fetch,
 ): Promise<TokenSet> {
   const res = await fetchImpl(TOKEN_URL, {
@@ -110,7 +115,7 @@ export async function exchangeCode(
   const body = (await res.json()) as { access_token?: string; refresh_token?: string; scope?: string };
   if (!body.access_token) throw new GmailError("token_exchange_failed", res.status);
   const scopes = (body.scope ?? "").split(/\s+/).filter(Boolean);
-  if (!scopes.includes(GMAIL_SCOPE)) throw new GmailError("scope_not_granted");
+  if (!scopes.includes(opts.expectedScope ?? GMAIL_SCOPE)) throw new GmailError("scope_not_granted");
   if (!body.refresh_token) throw new GmailError("no_refresh_token");
   return { accessToken: body.access_token, refreshToken: body.refresh_token, scopes };
 }
@@ -264,6 +269,39 @@ export async function getMessageHeaders(accessToken: string, id: string, fetchIm
     if ((SCAN_HEADERS as readonly string[]).some((s) => s.toLowerCase() === key) && !(key in headers)) headers[key] = h.value;
   }
   return { id: m.id, threadId: m.threadId, labelIds: m.labelIds ?? [], internalDate: Number(m.internalDate ?? 0), headers };
+}
+
+/** One MIME part of a message (format=full). Attachment data is never included by Gmail; only an attachmentId. */
+export interface GmailPart {
+  mimeType?: string;
+  filename?: string;
+  headers?: { name: string; value: string }[];
+  body?: { size?: number; data?: string; attachmentId?: string };
+  parts?: GmailPart[];
+}
+
+export interface FullMessage {
+  id: string;
+  threadId?: string;
+  labelIds: string[];
+  internalDate: number;
+  payload: GmailPart;
+}
+
+/**
+ * Stage B (behind FEATURE_EXTRACT, off): the full message for ONE message ID
+ * that the database handed out as customer-linked. Needs gmail.readonly, which
+ * is requested only when GMAIL_CONTENT_ACCESS=on; with gmail.metadata Google
+ * refuses this call. Only the extraction route uses it (guard test).
+ */
+export async function getMessageFull(accessToken: string, id: string, fetchImpl: Fetch = fetch): Promise<FullMessage> {
+  if (!/^[0-9a-zA-Z_-]{1,64}$/.test(id)) throw new GmailError("gmail_api_error", 400, "bad_message_id");
+  const m = await gmailGet<{ id: string; threadId?: string; labelIds?: string[]; internalDate?: string; payload?: GmailPart }>(
+    `/messages/${encodeURIComponent(id)}?format=full`,
+    accessToken,
+    fetchImpl,
+  );
+  return { id: m.id, threadId: m.threadId, labelIds: m.labelIds ?? [], internalDate: Number(m.internalDate ?? 0), payload: m.payload ?? {} };
 }
 
 /** Label names and IDs (to honour an employee's own exclude label). */
