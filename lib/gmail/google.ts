@@ -310,6 +310,14 @@ export async function listLabels(accessToken: string, fetchImpl: Fetch = fetch):
   return r.labels ?? [];
 }
 
+/** Gmail reports per-user rate limits as 403 with one of these reasons (as well as 429). */
+const RATE_LIMIT_REASONS = new Set(["rateLimitExceeded", "userRateLimitExceeded", "RATE_LIMIT_EXCEEDED"]);
+
+/** True for Gmail's "slow down" answers: 429, or 403 with a rate-limit reason. Not for permission errors. */
+export function isRateLimited(e: unknown): boolean {
+  return e instanceof GmailError && e.code === "gmail_api_error" && (e.httpStatus === 429 || (e.httpStatus === 403 && RATE_LIMIT_REASONS.has(e.reason ?? "")));
+}
+
 /** Retries rate limits and server errors with exponential backoff. Never retries a revoked token. */
 export async function withRetry<T>(fn: () => Promise<T>, opts: { tries?: number; baseMs?: number; sleep?: (ms: number) => Promise<void> } = {}): Promise<T> {
   const tries = opts.tries ?? 3;
@@ -318,7 +326,7 @@ export async function withRetry<T>(fn: () => Promise<T>, opts: { tries?: number;
     try {
       return await fn();
     } catch (e) {
-      const retryable = e instanceof GmailError && e.code === "gmail_api_error" && (e.httpStatus === 429 || (e.httpStatus ?? 0) >= 500);
+      const retryable = e instanceof GmailError && e.code === "gmail_api_error" && (e.httpStatus === 429 || (e.httpStatus ?? 0) >= 500 || isRateLimited(e));
       if (!retryable || attempt >= tries) throw e;
       await sleep((opts.baseMs ?? 500) * 2 ** (attempt - 1));
     }

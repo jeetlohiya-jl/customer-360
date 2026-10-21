@@ -8,7 +8,7 @@ import { CASES, CUSTOMERS, OWNER_EMAIL, PLANTED } from "../fixtures/synthetic-em
 const OWNER = "00000000-0000-4000-8000-0000000000a1";
 const usage = { input_tokens: 1000, output_tokens: 400, cache_read_input_tokens: 2500, cache_creation_input_tokens: 0 };
 
-function harness(opts: { reserveLimit?: number; modelError?: unknown; revoked?: boolean } = {}) {
+function harness(opts: { reserveLimit?: number; modelError?: unknown; revoked?: boolean; rateLimit?: "labels" | "get"; forbidden?: boolean } = {}) {
   const items: ClaimedItem[] = CASES.map((c) => ({
     owner_id: OWNER, mailbox_email: OWNER_EMAIL, gmail_message_id: c.msg.id, gmail_thread_id: null,
     message_at: "2026-09-15T10:00:00.000Z", direction: c.direction, customers: CUSTOMERS,
@@ -37,9 +37,14 @@ function harness(opts: { reserveLimit?: number; modelError?: unknown; revoked?: 
       if (opts.revoked) throw new GmailError("revoked", 400, "invalid_grant");
       return "access";
     },
-    listLabels: async () => [{ id: "Label_9", name: "C360-Exclude" }],
+    listLabels: async () => {
+      if (opts.rateLimit === "labels") throw new GmailError("gmail_api_error", 403, "userRateLimitExceeded");
+      return [{ id: "Label_9", name: "C360-Exclude" }];
+    },
     getMessage: async (_at, id) => {
       calls.fetched.push(id);
+      if (opts.rateLimit === "get" && calls.fetched.length === 3) throw new GmailError("gmail_api_error", 403, "userRateLimitExceeded");
+      if (opts.forbidden && calls.fetched.length === 3) throw new GmailError("gmail_api_error", 403, "insufficientPermissions");
       return CASES.find((c) => c.msg.id === id)!.msg;
     },
   };
@@ -113,6 +118,30 @@ describe("extraction run", () => {
     expect(h.calls.model).toBe(0);
     expect(sum.failed).toBe(CASES.length);
     expect(new Set(h.calls.fails.values())).toEqual(new Set(["gmail_auth:revoked"]));
+  });
+
+  it("Gmail rate limit while listing labels: every item goes back to the queue, none fail", async () => {
+    const h = harness({ rateLimit: "labels" });
+    const sum = await runExtractTick(h.deps);
+    expect(sum.failed).toBe(0);
+    expect(sum.released).toBe(h.items.length);
+    expect(h.calls.fetched).toHaveLength(0);
+  });
+
+  it("Gmail rate limit on a message: that and the mailbox's remaining items go back to the queue", async () => {
+    const h = harness({ rateLimit: "get" });
+    const sum = await runExtractTick(h.deps);
+    expect(sum.failed).toBe(0);
+    expect(h.calls.fetched).toHaveLength(3); // nothing more is fetched from that mailbox this run
+    expect(sum.released).toBe(h.items.length - 2);
+    expect(h.logs.join("\n")).toContain("extract_rate_limited");
+  });
+
+  it("a 403 that is NOT a rate limit still fails the item (with a safe code)", async () => {
+    const h = harness({ forbidden: true });
+    const sum = await runExtractTick(h.deps);
+    expect(sum.failed).toBe(1);
+    expect([...h.calls.fails.values()][0]).toBe("gmail_get:gmail:gmail_api_error_403");
   });
 
   it("the worst-case reservation always covers the real cost", () => {

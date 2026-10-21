@@ -1,0 +1,30 @@
+# Slack app manifest for the Customer 360 DM assistant.
+# Slack: https://api.slack.com/apps > Create New App > From a manifest > (workspace) > paste this.
+# Replace YOUR-APP-DOMAIN with the production address (APP_BASE_URL without https://).
+display_information:
+  name: Customer 360
+  description: Answers questions about Cirkla customers from stored email facts.
+  background_color: "#2f4a3a"
+features:
+  app_home:
+    home_tab_enabled: false
+    messages_tab_enabled: true
+    messages_tab_read_only_enabled: false
+  bot_user:
+    display_name: Customer 360
+    always_online: true
+oauth_config:
+  scopes:
+    bot:
+      - chat:write          # reply in the DM
+      - im:history          # receive messages sent to the bot in its DM
+      - users:read          # look up who is asking...
+      - users:read.email    # ...by their Slack email, matched to an active Cirkla employee
+settings:
+  event_subscriptions:
+    request_url: https://YOUR-APP-DOMAIN/api/slack/events
+    bot_events:
+      - message.im
+  org_deploy_enabled: false
+  socket_mode_enabled: false
+  token_rotation_enabled: false

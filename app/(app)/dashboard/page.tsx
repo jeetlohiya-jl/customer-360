@@ -117,7 +117,7 @@ export default async function DashboardPage({
               <dd>Phase {PHASE} · {PHASE_LABEL}</dd>
               <dt>Slack</dt>
               <dd>
-                <span className="pill off">{features.slack}</span>
+                <span className={features.slack === "on" ? "pill" : "pill off"}>{features.slack}</span>
               </dd>
             </dl>
           </div>

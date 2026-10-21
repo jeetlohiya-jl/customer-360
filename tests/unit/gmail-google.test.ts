@@ -167,3 +167,28 @@ describe("Stage B content permission (only when GMAIL_CONTENT_ACCESS=on)", () =>
     await expect(exchangeCode({ ...opts, expectedScope: READONLY }, meta)).rejects.toMatchObject({ code: "scope_not_granted" });
   });
 });
+
+describe("Gmail rate limits (403 with a rate-limit reason)", () => {
+  it("are recognised and retried; permission errors are not", async () => {
+    const { isRateLimited, withRetry } = await import("@/lib/gmail/google");
+    expect(isRateLimited(new GmailError("gmail_api_error", 403, "userRateLimitExceeded"))).toBe(true);
+    expect(isRateLimited(new GmailError("gmail_api_error", 403, "rateLimitExceeded"))).toBe(true);
+    expect(isRateLimited(new GmailError("gmail_api_error", 429))).toBe(true);
+    expect(isRateLimited(new GmailError("gmail_api_error", 403, "insufficientPermissions"))).toBe(false);
+    expect(isRateLimited(new GmailError("gmail_api_error", 403))).toBe(false);
+
+    let n = 0;
+    const ok = await withRetry(async () => {
+      if (++n < 3) throw new GmailError("gmail_api_error", 403, "userRateLimitExceeded");
+      return "done";
+    }, { sleep: async () => {} });
+    expect(ok).toBe("done");
+
+    n = 0;
+    await expect(withRetry(async () => {
+      n++;
+      throw new GmailError("gmail_api_error", 403, "insufficientPermissions");
+    }, { sleep: async () => {} })).rejects.toThrow();
+    expect(n).toBe(1);
+  });
+});

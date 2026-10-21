@@ -10,7 +10,7 @@
  * local variable. It is never logged, stored, thrown or put in an error code.
  * Logs carry event names, counts and safe codes only. All I/O is injected.
  */
-import { GmailError, type FullMessage, type MessageHeaders } from "@/lib/gmail/google";
+import { GmailError, isRateLimited, type FullMessage, type MessageHeaders } from "@/lib/gmail/google";
 import { EXCLUDE_LABEL_RE, exclusionRule } from "@/lib/scan/classify";
 import { errorCode, errorStage, inStage, StageError } from "@/lib/scan/errors";
 import { costMicroUsd, ModelError, reservationMicroUsd, type ExtractModel, type Usage } from "./model";
@@ -167,6 +167,8 @@ export async function runExtractTick(deps: ExtractDeps): Promise<TickSummary> {
     let accessToken: string | null = null;
     let excludeLabelIds = new Set<string>();
     let ownerError: string | null = null;
+    // Gmail asked us to slow down for this mailbox: put its items back for a later run, never mark them failed.
+    let ownerRateLimited = false;
     try {
       const tok = await inStage("db_token", () => deps.db.token(ownerId));
       if (!tok) throw new StageError("db_token", new Error("no_token"));
@@ -176,11 +178,12 @@ export async function runExtractTick(deps: ExtractDeps): Promise<TickSummary> {
       excludeLabelIds = new Set(labels.filter((l) => EXCLUDE_LABEL_RE.test(l.name)).map((l) => l.id));
     } catch (e) {
       const inner = e instanceof StageError ? e.cause : e;
-      ownerError = inner instanceof GmailError && inner.code === "revoked" ? "gmail_auth:revoked" : `${errorStage(e)}:${errorCode(e)}`;
+      if (isRateLimited(inner)) ownerRateLimited = true;
+      else ownerError = inner instanceof GmailError && inner.code === "revoked" ? "gmail_auth:revoked" : `${errorStage(e)}:${errorCode(e)}`;
     }
 
     for (const item of list) {
-      if (budgetStopped) {
+      if (budgetStopped || ownerRateLimited) {
         await deps.db.release(ownerId, item.gmail_message_id);
         sum.released++;
         continue;
@@ -243,6 +246,14 @@ export async function runExtractTick(deps: ExtractDeps): Promise<TickSummary> {
         sum.facts += n;
         sum.facts_for_review += v.facts.filter((f) => f.review_reasons.length > 0).length;
       } catch (e) {
+        const inner = e instanceof StageError ? e.cause : e;
+        if (isRateLimited(inner) && !reservation) {
+          ownerRateLimited = true;
+          await deps.db.release(ownerId, item.gmail_message_id).catch(() => undefined);
+          sum.released++;
+          log({ event: "extract_rate_limited", stage: errorStage(e) });
+          continue;
+        }
         const code = `${errorStage(e)}:${modelOrErrorCode(e)}`.slice(0, 64);
         await deps.db.fail(ownerId, item.gmail_message_id, code).catch(() => undefined);
         sum.failed++;

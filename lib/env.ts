@@ -9,7 +9,7 @@ import { z } from "zod";
  *   Next.js, so they must never hold secrets. Only the allowlisted names in
  *   PUBLIC_ENV_ALLOWLIST may exist.
  * - Gmail (Phase 2 proof of concept) may be "on" only together with its OAuth
- *   client and token-encryption key. Slack must still be "off".
+ *   client and token-encryption key.
  * - Scan settings (FEATURE_SCAN, CRON_SECRET, WORKER_DATABASE_*) are the one
  *   exception to "fail closed": a bad value turns scanning off and is logged
  *   by name, but never stops the site (Stage 3.1.1, see lib/scan/config.ts).
@@ -61,8 +61,11 @@ export const serverEnvSchema = publicEnvSchema.extend({
     .transform((d) => d.trim().toLowerCase())
     .refine((d) => domainRegex.test(d), "must be a bare domain such as gocirkla.com"),
   FEATURE_GMAIL: z.enum(["on", "off"], { error: "FEATURE_GMAIL must be 'on' or 'off'" }),
-  // Slack is not built yet; it cannot be enabled by configuration.
-  FEATURE_SLACK: z.literal("off", { error: "FEATURE_SLACK must be 'off' (Slack is not built yet)" }),
+  // Slack DM assistant. "on" does nothing unless its settings are also valid
+  // (lib/slack/config.ts switches it off otherwise, without stopping the site).
+  FEATURE_SLACK: z.enum(["on", "off"], { error: "FEATURE_SLACK must be 'on' or 'off'" }),
+  SLACK_SIGNING_SECRET: z.string().optional(),
+  SLACK_BOT_TOKEN: z.string().optional(),
   // Gmail connection (required when FEATURE_GMAIL=on). Server-only.
   GOOGLE_GMAIL_CLIENT_ID: z.string().regex(/\.apps\.googleusercontent\.com$/, "must be a Google OAuth client ID").optional(),
   GOOGLE_GMAIL_CLIENT_SECRET: z.string().min(10).optional(),

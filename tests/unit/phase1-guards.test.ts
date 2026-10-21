@@ -2,7 +2,8 @@ import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join, relative } from "node:path";
 import { describe, expect, it } from "vitest";
 import { SIGN_IN_SCOPES, containsGmailScope, signInScopeString } from "@/lib/auth/scopes";
-import { isSlackEnabled } from "@/lib/features";
+import { parseServerEnv } from "@/lib/env";
+import { parseSlackConfig } from "@/lib/slack/config";
 import { GMAIL_SCOPE } from "@/lib/gmail/google";
 import { isPublicPath } from "@/proxy";
 
@@ -40,8 +41,20 @@ describe("Gmail access is narrow and contained", () => {
     expect([...new Set(scopes)]).toEqual(["googleapis.com/auth/gmail.metadata", "googleapis.com/auth/gmail.readonly"]);
   });
 
-  it("Slack stays disabled", () => {
-    expect(isSlackEnabled()).toBe(false);
+  it("Slack is off unless FEATURE_SLACK=on and all its settings are valid", () => {
+    const env = parseServerEnv({
+      NEXT_PUBLIC_SUPABASE_URL: "http://127.0.0.1:54321", NEXT_PUBLIC_SUPABASE_ANON_KEY: "synthetic-publishable-key-0123456789",
+      APP_BASE_URL: "http://localhost:3000", WORKSPACE_DOMAIN: "gocirkla.com", FEATURE_GMAIL: "off", FEATURE_SLACK: "off",
+    });
+    expect(parseSlackConfig(env).enabled).toBe(false);
+    expect(parseSlackConfig({ ...env, FEATURE_SLACK: "on" }).enabled).toBe(false); // on, but no Slack settings
+  });
+
+  it("only the Slack events route and lib/slack talk to Slack", () => {
+    const callers = [...sourceFiles(join(ROOT, "app")), ...sourceFiles(join(ROOT, "lib"))]
+      .filter((f) => readFileSync(f, "utf8").includes("slack.com/api"))
+      .map((f) => relative(ROOT, f).replace(/\\/g, "/"));
+    expect(callers).toEqual(["lib/slack/api.ts"]);
   });
 });
 

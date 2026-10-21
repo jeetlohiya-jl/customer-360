@@ -59,6 +59,9 @@ try {
   check(!JSON.stringify(body).match(/key|secret|token|password/i), "health response contains no secrets");
   check((health.headers.get("content-security-policy") ?? "").includes("default-src 'none'"), "API responses carry deny-all CSP");
 
+  const slack = await fetch(`${BASE}/api/slack/events`, { method: "POST", body: '{"type":"url_verification","challenge":"x"}' });
+  check(slack.status === 404, "Slack events endpoint is closed while Slack is off");
+
   const login = await fetch(`${BASE}/login`, { redirect: "manual" });
   const csp = login.headers.get("content-security-policy") ?? "";
   check(login.status === 200, "GET /login renders (200)");

@@ -35,8 +35,9 @@ describe("parseServerEnv", () => {
     expect(() => parseServerEnv({ ...valid, WORKSPACE_DOMAIN: "" })).toThrow(/WORKSPACE_DOMAIN/);
   });
 
-  it("Slack cannot be enabled", () => {
-    expect(() => parseServerEnv({ ...valid, FEATURE_SLACK: "on" })).toThrow(/FEATURE_SLACK/);
+  it("Slack is 'on' or 'off'; its secrets are checked separately (fail-safe, lib/slack/config.ts)", () => {
+    expect(() => parseServerEnv({ ...valid, FEATURE_SLACK: "maybe" })).toThrow(/FEATURE_SLACK/);
+    expect(parseServerEnv({ ...valid, FEATURE_SLACK: "on" }).FEATURE_SLACK).toBe("on");
   });
 
   it("Gmail can be enabled only with its client and encryption key", () => {
