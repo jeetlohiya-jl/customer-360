@@ -233,3 +233,25 @@ describe("answering a DM", () => {
     expect(h.logs.join("\n")).toContain("anthropic:http_error_529");
   });
 });
+
+describe("the answer call to Anthropic", () => {
+  const ok = (body: unknown) => new Response(JSON.stringify(body), { status: 200, headers: { "content-type": "application/json" } });
+  const u = { input_tokens: 10, output_tokens: 5 };
+
+  it("forces the send_answer tool and reads the answer from it", async () => {
+    const { anthropicAnswerModel } = await import("@/lib/slack/model");
+    let sent: Record<string, unknown> = {};
+    const m = anthropicAnswerModel("k", (async (_u: unknown, init?: RequestInit) => {
+      sent = JSON.parse(String(init?.body));
+      return ok({ content: [{ type: "tool_use", name: "send_answer", input: { answer: "Quoted $0.21 [F1]." } }], usage: u, stop_reason: "tool_use" });
+    }) as typeof fetch);
+    expect((await m.answer("p")).text).toBe("Quoted $0.21 [F1].");
+    expect(sent.tool_choice).toEqual({ type: "tool", name: "send_answer" });
+  });
+
+  it("no answer in the reply: an error carrying only the API's stop reason", async () => {
+    const { anthropicAnswerModel } = await import("@/lib/slack/model");
+    const m = anthropicAnswerModel("k", (async () => ok({ content: [{ type: "text", text: "" }], usage: u, stop_reason: "max_tokens" })) as typeof fetch);
+    await expect(m.answer("p")).rejects.toMatchObject({ code: "no_tool_output", type: "max_tokens" });
+  });
+});

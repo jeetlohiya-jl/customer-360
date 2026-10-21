@@ -11,7 +11,7 @@
  */
 import { gmailMessageUrl } from "@/lib/search/params";
 
-export const ANSWER_MAX_TOKENS = 700;
+export const ANSWER_MAX_TOKENS = 1200;
 export const MAX_FACTS = 80;
 export const MAX_FACT_CHARS = 40_000;
 export const MAX_REPLY_CHARS = 3_800;
@@ -91,6 +91,8 @@ export function pickCustomers(rows: CustomerMatch[]): CustomerMatch[] {
 }
 
 export const ANSWER_SYSTEM_PROMPT = `You answer questions from Cirkla employees about Cirkla's customers, in a Slack direct message. Cirkla makes molded-fiber packaging.
+
+Reply only by calling the send_answer tool.
 
 You are given numbered facts (F1, F2, ...) that were extracted from customer emails and stored. Use ONLY these facts. Never use outside knowledge and never guess.
 
