@@ -76,6 +76,21 @@ describe("cleanup and pre-filter", () => {
     expect(m.attachments).toBe(1);
   });
 
+  it("never skips short approvals, confirmations or cancellations", () => {
+    for (const t of ["Approved.", "Go ahead", "Confirmed, thanks", "Please cancel", "OK to ship", "Price works, PO to follow"]) {
+      expect(prefilter({}, t, { calendar: false }), t).toBeNull();
+    }
+    expect(prefilter({}, "Thanks!", { calendar: false })).toBe("too_short");
+    expect(prefilter({}, "Thank you so much for the update, much appreciated. Best regards", { calendar: false })).toBe("acknowledgement");
+  });
+
+  it("keeps the start of the earlier message as context, without quote markers", () => {
+    const c = cleanBody("Approved.\n\nOn Tue, Oct 6 Ravi <r@x.com> wrote:\n> Please approve PO 9921\n> for 4,000 cases.");
+    expect(c.text).toBe("Approved.");
+    expect(c.replyContext).toBe("Please approve PO 9921\nfor 4,000 cases.");
+    expect(cleanBody("No reply here.").replyContext).toBe("");
+  });
+
   it("keeps real short business emails", () => {
     expect(prefilter({}, "Please ship 200 cases on Friday, PO 77.", { calendar: false })).toBeNull();
     expect(prefilter({}, "Thanks! Please ship 200 more cases next week as well.", { calendar: false })).toBeNull();

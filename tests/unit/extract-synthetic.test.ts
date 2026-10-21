@@ -8,6 +8,7 @@ import { describe, expect, it } from "vitest";
 import { prepareMessage } from "@/lib/extract/run";
 import { validateFacts } from "@/lib/extract/validate";
 import { CASES, CUSTOMERS, OWNER_EMAIL, PLANTED } from "../fixtures/synthetic-emails";
+import { CONTEXT_CHARS, SHORT_REPLY_CHARS } from "@/lib/extract/text";
 
 const item = (direction: "inbound" | "outbound") => ({ mailbox_email: OWNER_EMAIL, message_at: "2026-09-15T10:00:00.000Z", direction, customers: CUSTOMERS });
 
@@ -23,6 +24,8 @@ describe.each(CASES)("synthetic email: $name", (c) => {
     const want = c.expect;
     const v = validateFacts(c.model, {
       text: prep.text,
+      context: prep.context,
+      messageDate: "2026-09-15",
       customers: CUSTOMERS,
       openFacts: (c.openFacts ?? []).map((f) => ({ id: f.id, customer_id: f.customer_id })),
       truncated: prep.truncated,
@@ -45,14 +48,14 @@ describe("guarantees across every synthetic case", () => {
   const ready = CASES.map((c) => ({ c, prep: prepareMessage(c.msg, item(c.direction), c.openFacts ?? [], new Set(c.excludeLabel ? ["Label_9"] : [])) }));
   const all = ready.flatMap(({ c, prep }) =>
     prep.kind === "ready" && c.model
-      ? validateFacts(c.model, { text: prep.text, customers: CUSTOMERS, openFacts: (c.openFacts ?? []).map((f) => ({ id: f.id, customer_id: f.customer_id })), truncated: prep.truncated }).facts
+      ? validateFacts(c.model, { text: prep.text, context: prep.context, messageDate: "2026-09-15", customers: CUSTOMERS, openFacts: (c.openFacts ?? []).map((f) => ({ id: f.id, customer_id: f.customer_id })), truncated: prep.truncated }).facts
       : [],
   );
 
-  it("no planted secret ever reaches the model prompt", () => {
+  it("no planted secret ever reaches the model prompt (including the earlier-message context)", () => {
     for (const { prep } of ready) {
       if (prep.kind !== "ready") continue;
-      for (const [kind, value] of Object.entries(PLANTED)) expect(prep.prompt, kind).not.toContain(value);
+      for (const [kind, value] of Object.entries(PLANTED)) if (kind !== "quotedSecret") expect(prep.prompt, kind).not.toContain(value);
     }
   });
 
@@ -80,7 +83,7 @@ describe("guarantees across every synthetic case", () => {
   it("every stored quote is word for word in the redacted text, and at most 200 characters", () => {
     for (const { c, prep } of ready) {
       if (prep.kind !== "ready" || !c.model) continue;
-      const v = validateFacts(c.model, { text: prep.text, customers: CUSTOMERS, openFacts: (c.openFacts ?? []).map((f) => ({ id: f.id, customer_id: f.customer_id })), truncated: prep.truncated });
+      const v = validateFacts(c.model, { text: prep.text, context: prep.context, messageDate: "2026-09-15", customers: CUSTOMERS, openFacts: (c.openFacts ?? []).map((f) => ({ id: f.id, customer_id: f.customer_id })), truncated: prep.truncated });
       for (const f of v.facts) {
         if (!f.evidence_quote) continue;
         expect(f.evidence_quote.length).toBeLessThanOrEqual(200);
@@ -89,11 +92,16 @@ describe("guarantees across every synthetic case", () => {
     }
   });
 
-  it("quoted reply history and attachments never reach the model", () => {
+  it("earlier messages reach the model only as short, redacted context for short replies; attachments never", () => {
     for (const { prep } of ready) {
       if (prep.kind !== "ready") continue;
-      expect(prep.prompt).not.toContain(PLANTED.quotedSecret);
       expect(prep.prompt).not.toContain("PO-4512.pdf");
+      if (prep.text.length >= SHORT_REPLY_CHARS) {
+        expect(prep.context).toBe("");
+        expect(prep.prompt).not.toContain(PLANTED.quotedSecret);
+      }
+      expect(prep.context.length).toBeLessThanOrEqual(CONTEXT_CHARS + 40); // redaction tokens can lengthen it slightly
+      if (prep.prompt.includes(PLANTED.quotedSecret)) expect(prep.prompt.indexOf(PLANTED.quotedSecret)).toBeGreaterThan(prep.prompt.indexOf("Earlier message (context only"));
     }
   });
 

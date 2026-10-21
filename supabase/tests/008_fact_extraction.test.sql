@@ -147,7 +147,7 @@ select is(private.worker_extract_commit('00000000-0000-4000-8000-0000000008a1', 
     pg_temp.f('00000000-0000-4000-8000-00000000c8a1', 0, 'order', 'request', 'explicit', 'open', 'explicit', 0.95, '{"quantity":5000,"unit":"cases","due_date":"2026-11-12"}'),
     pg_temp.f('00000000-0000-4000-8000-00000000c8a1', 1, 'quality_issue', 'report', 'explicit', 'open', 'explicit', 0.92),
     pg_temp.f('00000000-0000-4000-8000-00000000c8a1', 2, 'pricing', 'commitment', 'explicit', 'not_applicable', 'none', 0.80, '{"unit_price":0.21,"currency":"USD"}'),
-    pg_temp.f('00000000-0000-4000-8000-00000000c8a1', 3, 'follow_up', 'request', 'explicit', 'open', 'explicit', 0.55)
+    pg_temp.f('00000000-0000-4000-8000-00000000c8a1', 3, 'follow_up', 'request', 'explicit', 'open', 'explicit', 0.45)
   )), 4, 'four facts committed for one email');
 select is(pg_temp.state('a8m1'), 'extracted', 'the item is marked extracted');
 select is((pg_temp.fact('a8m1', 0)).stance, 'request', 'a customer request stays a request');

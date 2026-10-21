@@ -49,7 +49,7 @@ describe.skipIf(!run)("PAID live extractor evaluation on synthetic emails", () =
       t.inputTokens += res.usage.input_tokens + res.usage.cache_read_input_tokens + res.usage.cache_creation_input_tokens;
       t.outputTokens += res.usage.output_tokens;
       const raw = (res.output as { facts?: { fact_type?: string; stance?: string }[] }).facts ?? [];
-      const v = validateFacts(res.output, { text: prep.text, customers: CUSTOMERS, openFacts: it.openFacts.map((f) => ({ id: f.id, customer_id: f.customer_id })), truncated: prep.truncated });
+      const v = validateFacts(res.output, { text: prep.text, context: prep.context, messageDate: "2026-09-15", customers: CUSTOMERS, openFacts: it.openFacts.map((f) => ({ id: f.id, customer_id: f.customer_id })), truncated: prep.truncated });
       const match = (f: { fact_type: string; stance: string; status: string }, l: { fact_type: string; stance: string; status?: string }) =>
         f.fact_type === l.fact_type && f.stance === l.stance && (!l.status || f.status === l.status);
       const commitLabelled = new Set(it.labels.filter((l) => l.stance === "commitment").map((l) => l.fact_type));

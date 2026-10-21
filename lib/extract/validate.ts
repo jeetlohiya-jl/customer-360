@@ -59,8 +59,12 @@ export interface CommitFact {
 }
 
 export interface ValidationContext {
-  /** The redacted, cleaned text that was sent to the model. */
+  /** The redacted, cleaned text that was sent to the model. Quotes must come from here. */
   text: string;
+  /** Redacted earlier-message context sent with a short reply. Numbers and dates may come from here, quotes may not. */
+  context?: string;
+  /** Email date (YYYY-MM-DD). */
+  messageDate?: string;
   customers: { id: string; name: string }[];
   openFacts: { id: string; customer_id: string }[];
   truncated: boolean;
@@ -142,7 +146,7 @@ export function validateFacts(raw: unknown, ctx: ValidationContext): ValidationR
   const list = raw && typeof raw === "object" && Array.isArray((raw as { facts?: unknown }).facts) ? ((raw as { facts: unknown[] }).facts) : [];
   const customerIds = new Set(ctx.customers.map((c) => c.id));
   const textNorm = ws(ctx.text);
-  const numbers = numbersIn(ctx.text);
+  const numbers = numbersIn(`${ctx.text}\n${ctx.context ?? ""}`);
   const seen = new Set<string>();
   const facts: CommitFact[] = [];
 
@@ -202,7 +206,7 @@ export function validateFacts(raw: unknown, ctx: ValidationContext): ValidationR
     // Dates.
     let dueDate = f.due_date && /^\d{4}-\d{2}-\d{2}$/.test(f.due_date) && !Number.isNaN(Date.parse(`${f.due_date}T00:00:00Z`)) ? f.due_date : null;
     if (f.due_date && !dueDate) reasons.add("date_not_in_text");
-    if (dueDate && !dayInText(dueDate, ctx.text)) {
+    if (dueDate && !dayInText(dueDate, `${ctx.text}\n${ctx.context ?? ""}`)) {
       reasons.add("date_not_in_text");
       dueDate = null;
     }
@@ -233,6 +237,11 @@ export function validateFacts(raw: unknown, ctx: ValidationContext): ValidationR
     if (stance === "cancellation") {
       status = "cancelled";
       statusBasis = basis === "explicit" ? "explicit" : "inferred";
+    }
+    // A commitment to a future delivery is open until an email says it arrived.
+    if (stance === "commitment" && f.fact_type === "delivery" && status === "resolved" && (!dueDate || !ctx.messageDate || dueDate >= ctx.messageDate)) {
+      status = "open";
+      statusBasis = "explicit";
     }
     if (status === "unknown" || status === "not_applicable") statusBasis = "none";
     else if (statusBasis === "none") statusBasis = "inferred";

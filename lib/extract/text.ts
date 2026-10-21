@@ -95,15 +95,42 @@ const SIGNATURE_START: RegExp[] = [
 export interface CleanText {
   text: string;
   truncated: boolean;
+  /**
+   * The start of the earlier message this email replies to (quote markers
+   * removed, at most CONTEXT_CHARS). Used only for SHORT replies such as
+   * "Approved, go ahead", which mean nothing without it. Never stored.
+   */
+  replyContext: string;
 }
+
+export const CONTEXT_CHARS = 800;
+export const SHORT_REPLY_CHARS = 300;
 
 export function cleanBody(raw: string): CleanText {
   let text = raw.replace(/\r\n?/g, "\n");
   let cut = text.length;
+  let quoteAt = -1;
+  for (const re of QUOTE_START) {
+    const m = re.exec(text);
+    if (m && (quoteAt < 0 || m.index < quoteAt)) quoteAt = m.index;
+  }
   for (const re of [...QUOTE_START, ...SIGNATURE_START]) {
     const m = re.exec(text);
     if (m && m.index < cut) cut = m.index;
   }
+  const replyContext =
+    quoteAt >= 0
+      ? text
+          .slice(quoteAt)
+          .split("\n")
+          .slice(1) // the "On ... wrote:" / "From:" line itself
+          .map((l) => l.replace(/^\s*(?:>\s?)+/, ""))
+          .join("\n")
+          .replace(/[ \t]+\n/g, "\n")
+          .replace(/\n{2,}/g, "\n")
+          .trim()
+          .slice(0, CONTEXT_CHARS)
+      : "";
   text = text.slice(0, cut);
   text = text
     .split("\n")
@@ -114,12 +141,16 @@ export function cleanBody(raw: string): CleanText {
     .replace(/\n{3,}/g, "\n\n")
     .trim();
   const truncated = text.length > MAX_TEXT_CHARS;
-  return { text: truncated ? text.slice(0, MAX_TEXT_CHARS) : text, truncated };
+  return { text: truncated ? text.slice(0, MAX_TEXT_CHARS) : text, truncated, replyContext };
 }
 
 // ---------------------------------------------------------------------------
 // Pre-filter (free rules; reason codes match private.extraction_state.skip_reason)
 // ---------------------------------------------------------------------------
+
+/** Words that make even a one-line reply worth reading ("Approved.", "Go ahead", "Please cancel"). */
+export const APPROVAL =
+  /\b(?:approved?|approval|go ahead|proceed|confirm(?:ed|s)?|agreed?|accepted?|sign(?:ed)? off|release[ds]?|cancel(?:led|ed)?|hold|order|po|ship(?:ped|ping)?|deliver(?:ed|y)?|price|quote|reject(?:ed)?|ok to|okay to)\b/i;
 
 export type SkipReason = "auto_reply" | "bulk" | "calendar" | "delivery_notice" | "too_short" | "acknowledgement" | "empty";
 
@@ -140,6 +171,8 @@ export function prefilter(headers: Record<string, string>, clean: string, mime: 
   }
   const body = clean.trim();
   if (!body) return "empty";
+  // Short approvals, confirmations and cancellations are the facts we most want; never skip them as short.
+  if (APPROVAL.test(body)) return null;
   if (body.length < 12 || (body.length < 40 && !/\d/.test(body))) return "too_short";
   if (body.length < 160 && !/\d/.test(body) && ACK_ONLY.test(body.replace(/\s+/g, " "))) return "acknowledgement";
   return null;

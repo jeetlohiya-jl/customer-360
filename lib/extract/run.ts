@@ -16,7 +16,7 @@ import { errorCode, errorStage, inStage, StageError } from "@/lib/scan/errors";
 import { costMicroUsd, ModelError, reservationMicroUsd, type ExtractModel, type Usage } from "./model";
 import { buildUserMessage, MODEL_ID } from "./prompt";
 import { redact, type RedactionKind } from "./redact";
-import { cleanBody, mimeText, prefilter, type SkipReason } from "./text";
+import { cleanBody, mimeText, prefilter, SHORT_REPLY_CHARS, type SkipReason } from "./text";
 import { validateFacts, type CommitFact, type DropReason, type ReviewReason } from "./validate";
 
 export interface ClaimedItem {
@@ -88,6 +88,8 @@ export type Prepared =
       kind: "ready";
       prompt: string;
       text: string;
+      /** Redacted earlier-message context sent with a short reply ("" if none). */
+      context: string;
       truncated: boolean;
       redactions: Partial<Record<RedactionKind, number>>;
     };
@@ -126,14 +128,18 @@ export function prepareMessage(
   if (skip) return { kind: "skip", reason: skip };
 
   const red = redact(clean.text);
+  const subject = headers["subject"] ? redact(headers["subject"].slice(0, 200)).text : undefined;
+  const context = clean.text.length < SHORT_REPLY_CHARS && clean.replyContext ? redact(clean.replyContext).text : "";
   const prompt = buildUserMessage({
     customers: item.customers,
     date: item.message_at.slice(0, 10),
     direction: item.direction,
     openFacts,
     text: red.text,
+    subject,
+    replyContext: context || undefined,
   });
-  return { kind: "ready", prompt, text: red.text, truncated: clean.truncated, redactions: red.counts };
+  return { kind: "ready", prompt, text: red.text, context, truncated: clean.truncated, redactions: red.counts };
 }
 
 function add<K extends string>(into: Partial<Record<K, number>>, from: Partial<Record<K, number>>) {
@@ -224,6 +230,8 @@ export async function runExtractTick(deps: ExtractDeps): Promise<TickSummary> {
 
         const v = validateFacts(result.output, {
           text: prep.text,
+          context: prep.context,
+          messageDate: item.message_at.slice(0, 10),
           customers: item.customers,
           openFacts: openFacts.map((f) => ({ id: f.id, customer_id: f.customer_id })),
           truncated: prep.truncated,

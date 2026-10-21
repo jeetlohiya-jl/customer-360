@@ -3,7 +3,7 @@
  * Versioned: every stored fact records PROMPT_VERSION.
  */
 
-export const PROMPT_VERSION = "x1";
+export const PROMPT_VERSION = "x3";
 export const MODEL_ID = "claude-haiku-5-5";
 export const MAX_OUTPUT_TOKENS = 1500;
 
@@ -14,6 +14,7 @@ export const STATUSES = ["open", "resolved", "cancelled", "not_applicable", "unk
 export const SYSTEM_PROMPT = `You extract business facts from ONE business email between Cirkla (a molded-fiber packaging manufacturer) and one of its customers, for Cirkla's internal customer records.
 
 Return facts only by calling the record_facts tool. Return an empty list when the email holds no business facts.
+Record only facts a salesperson would want in the customer's record. Never record: meeting scheduling or availability ("tomorrow works", "free after 1:30"), out-of-office or PTO notes, greetings, or carrier/courier service questions. Quality over quantity: one precise fact beats three vague ones, and most routine emails have none.
 
 Fact types:
 - requirement: what the customer needs (product, specification, volume, forecast)
@@ -21,7 +22,7 @@ Fact types:
 - pricing: a price asked for, quoted or agreed, with its basis
 - delivery: a ship or delivery date asked for, promised or reported
 - quality_issue: a complaint or defect, or its resolution
-- follow_up: an action someone owes (send samples, call back, share a document)
+- follow_up: a CONCRETE business action someone owes, with a clear owner: send samples, a quote, a PI or invoice, artwork, a credit note, specifications or documents; arrange a trial; resolve a claim. NOT courtesies or routine replies ("let me know", "I'll get back to you", "thanks, noted", "please confirm receipt", "let's catch up", scheduling a call).
 
 Stance (be strict; this matters most):
 - request: someone asks for something ("can you", "please send", "we need", a question). A customer asking for a quantity or date is a REQUEST, not an order.
@@ -42,8 +43,10 @@ Rules:
 - summary: one plain sentence, at most 300 characters.
 - Text shown as [EMAIL], [PHONE], [CARD], [BANK], [GOV_ID], [SECRET], [LINK], [IBAN] or [IFSC] was removed on purpose. Never try to restore it.
 - Do not extract anything about people's health, family, personal life, salaries, immigration, legal disputes or HR matters. Skip those parts entirely.
-- confidence: 0 to 1, how sure you are that the fact, its stance and its numbers are right.
-- If a fact seems to be about a different company than the customers listed, set about_other_customer to true.`;
+- confidence: 0 to 1, how sure you are that the fact, its stance and its numbers are right. Use the full range: 0.9 or more when the email states it plainly, around 0.6 when you are interpreting, below 0.5 when unsure.
+- If a fact is about, or comes from, a company other than the customers listed (for example a carrier, logistics firm, film or packaging supplier, or another customer), set about_other_customer to true.
+- A confirmed FUTURE delivery or shipment is a commitment with status open; it becomes resolved only when an email says it was delivered.
+- "Earlier message" text, when present, is the email this short reply answers. Use it ONLY to understand the reply (e.g. what "Approved" refers to). Extract facts from the reply itself; evidence_quote must come from the reply, not from the earlier message.`;
 
 export const OUTPUT_SCHEMA = {
   type: "object",
@@ -90,6 +93,10 @@ export interface PromptInput {
   openFacts: { id: string; customer_id: string; type: string; summary: string; date: string }[];
   /** Cleaned, REDACTED email text. */
   text: string;
+  /** REDACTED subject line (sent for context, never stored). */
+  subject?: string;
+  /** REDACTED start of the earlier message, only for short replies. */
+  replyContext?: string;
 }
 
 /** The per-email message. Contains no email addresses or mailbox owner identity. */
@@ -102,6 +109,8 @@ export function buildUserMessage(p: PromptInput): string {
     `Customer(s) this email is linked to:\n${customers}`,
     `Email date: ${p.date}. Direction: ${p.direction === "inbound" ? "sent BY the customer to Cirkla" : "sent BY Cirkla to the customer"}.`,
     `Earlier open facts for these customers:\n${open}`,
+    ...(p.subject ? [`Subject: ${p.subject}`] : []),
     `Email text (cleaned and redacted):\n<<<\n${p.text}\n>>>`,
+    ...(p.replyContext ? [`Earlier message (context only; do not quote it):\n<<<\n${p.replyContext}\n>>>`] : []),
   ].join("\n\n");
 }
