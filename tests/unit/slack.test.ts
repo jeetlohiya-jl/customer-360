@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import { parseServerEnv } from "@/lib/env";
 import { ModelError } from "@/lib/extract/model";
 import { buildAnswerPrompt, isHelp, pickCustomers, renderAnswer, wantsSourceOwner, type SlackFact } from "@/lib/slack/answer";
+import { SlackError } from "@/lib/slack/api";
 import { parseSlackConfig } from "@/lib/slack/config";
 import { answerReservationMicroUsd } from "@/lib/slack/model";
 import { handleDm, MESSAGES, type SlackDb } from "@/lib/slack/run";
@@ -211,6 +212,13 @@ describe("answering a DM", () => {
     expect(h.prompts).toHaveLength(0);
   });
 
+  it("a Slack API error is reported with Slack's error code", async () => {
+    const h = harness({ user: async () => null });
+    h.deps.slack.userEmail = async () => { throw new SlackError("missing_scope", 200); };
+    expect(await handleDm(h.deps, ev)).toBe("error");
+    expect(h.posts).toEqual([`${MESSAGES.error} (ref: slack:missing_scope)`]);
+  });
+
   it("help needs no AI call", async () => {
     const h = harness();
     expect(await handleDm(h.deps, { ...ev, text: "help" })).toBe("help");
@@ -221,7 +229,7 @@ describe("answering a DM", () => {
     const h = harness({ modelError: new ModelError("http_error", 529, "overloaded_error") });
     expect(await handleDm(h.deps, ev)).toBe("error");
     expect(h.settled).toEqual([0]);
-    expect(h.posts).toEqual([MESSAGES.error]);
+    expect(h.posts).toEqual([`${MESSAGES.error} (ref: anthropic:http_error_529_overloaded_error)`]);
     expect(h.logs.join("\n")).toContain("anthropic:http_error_529");
   });
 });

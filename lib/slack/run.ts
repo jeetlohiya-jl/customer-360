@@ -10,7 +10,7 @@ import { MODEL_ID } from "@/lib/extract/prompt";
 import { redact } from "@/lib/extract/redact";
 import { errorCode } from "@/lib/scan/errors";
 import { buildAnswerPrompt, factsForPrompt, HELP_TEXT, isHelp, pickCustomers, renderAnswer, wantsSourceOwner, type CustomerMatch, type SlackFact } from "./answer";
-import type { SlackApi } from "./api";
+import { SlackError, type SlackApi } from "./api";
 import { answerReservationMicroUsd, type AnswerModel } from "./model";
 
 export interface SlackDb {
@@ -124,10 +124,15 @@ export async function handleDm(deps: SlackDeps, ev: DmEvent): Promise<DmOutcome>
     await reply(about + rendered.text);
     return (outcome = "answered");
   } catch (e) {
-    const code = e instanceof ModelError ? `anthropic:${e.code}_${e.httpStatus ?? ""}` : errorCode(e);
+    const code = (
+      e instanceof ModelError ? `anthropic:${e.code}_${e.httpStatus ?? ""}${e.type ? `_${e.type}` : ""}`
+      : e instanceof SlackError ? `slack:${e.code}`
+      : errorCode(e)
+    ).slice(0, 64);
     counts.failed = 1;
-    log({ event: "slack_dm_error", code: code.slice(0, 64) });
-    await reply(MESSAGES.error).catch(() => undefined);
+    log({ event: "slack_dm_error", code });
+    // The code is safe to show (status and error type only, never content) and makes problems easy to report.
+    await reply(`${MESSAGES.error} (ref: ${code})`).catch(() => undefined);
     return (outcome = "error");
   } finally {
     if (outcome !== "duplicate") log({ event: "slack_dm", outcome, ...counts });
