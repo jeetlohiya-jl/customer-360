@@ -30,6 +30,7 @@ describe("Stage 3 guards: no new permissions, scanning off by default", () => {
     expect(vercel.crons).toEqual([
       { path: "/api/cron/scan", schedule: "* * * * *" },
       { path: "/api/cron/extract", schedule: "* * * * *" }, // no-op (204) unless extraction is validly enabled
+      { path: "/api/cron/sync", schedule: "*/10 * * * *" }, // no-op (204) unless sync is validly enabled
     ]);
     const route = readFileSync(join(root, "app/api/cron/scan/route.ts"), "utf8");
     expect(route.indexOf("if (!scan.enabled)")).toBeGreaterThan(-1);

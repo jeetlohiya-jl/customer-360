@@ -83,6 +83,10 @@ export const serverEnvSchema = publicEnvSchema.extend({
   // "on" requests gmail.readonly instead of gmail.metadata (approval step). Anything else: header-only.
   GMAIL_CONTENT_ACCESS: z.string().optional(),
   ANTHROPIC_API_KEY: z.string().optional(),
+  // Gmail sync (push + safety net), lenient here; validated fail-safe in lib/sync/config.ts.
+  FEATURE_SYNC: z.string().optional(),
+  GMAIL_PUSH_TOPIC: z.string().optional(),
+  GMAIL_PUSH_SERVICE_ACCOUNT: z.string().optional(),
   NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: z
     .string()
     .refine(isPublishableKey, "must be a publishable (sb_publishable_) or anon key, never a secret/service key")

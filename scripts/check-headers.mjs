@@ -61,6 +61,8 @@ try {
 
   const slack = await fetch(`${BASE}/api/slack/events`, { method: "POST", body: '{"type":"url_verification","challenge":"x"}' });
   check(slack.status === 404, "Slack events endpoint is closed while Slack is off");
+  const push = await fetch(`${BASE}/api/gmail/push`, { method: "POST", body: "{}" });
+  check(push.status === 404, "Gmail push endpoint is closed while sync is off");
 
   const login = await fetch(`${BASE}/login`, { redirect: "manual" });
   const csp = login.headers.get("content-security-policy") ?? "";

@@ -335,3 +335,78 @@ export async function withRetry<T>(fn: () => Promise<T>, opts: { tries?: number;
 
 /** Associated data that binds an encrypted refresh token to its owner. */
 export const gmailTokenContext = (userId: string) => `gmail-refresh-token:${userId}`;
+
+// ---------------------------------------------------------------------------
+// Sync (0011): Gmail push notifications and the history of changes. Still
+// gmail.metadata-compatible: these calls return ids, labels and history ids only.
+// ---------------------------------------------------------------------------
+
+async function gmailPost<T>(path: string, accessToken: string, body: unknown, fetchImpl: Fetch): Promise<T> {
+  const res = await fetchImpl(`${GMAIL_API}${path}`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+    cache: "no-store",
+  });
+  if (res.status === 401) throw new GmailError("revoked", 401, await apiErrorReason(res));
+  if (!res.ok) throw new GmailError("gmail_api_error", res.status, await apiErrorReason(res));
+  return (await res.json()) as T;
+}
+
+const HISTORY_ID = /^[0-9]{1,20}$/;
+
+/**
+ * Asks Gmail to notify the Pub/Sub topic when new mail arrives in Inbox or Sent.
+ * Gmail keeps the watch for 7 days; it is renewed well before then.
+ */
+export async function watchMailbox(
+  accessToken: string,
+  topicName: string,
+  fetchImpl: Fetch = fetch,
+): Promise<{ historyId: string; expiration: string }> {
+  const r = await gmailPost<{ historyId?: string; expiration?: string }>(
+    "/watch",
+    accessToken,
+    { topicName, labelIds: ["INBOX", "SENT"], labelFilterBehavior: "INCLUDE" },
+    fetchImpl,
+  );
+  const ms = Number(r.expiration);
+  if (!r.historyId || !HISTORY_ID.test(r.historyId) || !Number.isFinite(ms)) throw new GmailError("gmail_api_error", 200, "bad_watch_reply");
+  return { historyId: r.historyId, expiration: new Date(ms).toISOString() };
+}
+
+/** The mailbox's current history id: where a catch-up hands over to live sync. */
+export async function getHistoryId(accessToken: string, fetchImpl: Fetch = fetch): Promise<string> {
+  const p = await gmailGet<{ historyId?: string }>("/profile", accessToken, fetchImpl);
+  if (!p.historyId || !HISTORY_ID.test(p.historyId)) throw new GmailError("gmail_api_error", 200, "bad_profile_reply");
+  return p.historyId;
+}
+
+/**
+ * One page of messages added since a history id. Gmail answers 404 when the
+ * id is too old (about a week); the caller then falls back to a catch-up.
+ */
+export async function listHistory(
+  accessToken: string,
+  startHistoryId: string,
+  pageToken: string | null,
+  fetchImpl: Fetch = fetch,
+): Promise<{ messages: MessageRef[]; historyId: string; nextPageToken: string | null }> {
+  if (!HISTORY_ID.test(startHistoryId)) throw new GmailError("gmail_api_error", 400, "bad_history_id");
+  const qs = new URLSearchParams({ startHistoryId, historyTypes: "messageAdded", maxResults: "500" });
+  if (pageToken) qs.set("pageToken", pageToken);
+  const r = await gmailGet<{ history?: { messagesAdded?: { message?: MessageRef & { labelIds?: string[] } }[] }[]; historyId?: string; nextPageToken?: string }>(
+    `/history?${qs}`,
+    accessToken,
+    fetchImpl,
+  );
+  const messages: MessageRef[] = [];
+  for (const h of r.history ?? []) {
+    for (const a of h.messagesAdded ?? []) {
+      const m = a.message;
+      if (m?.id && !(m.labelIds ?? []).some((l) => l === "DRAFT" || l === "SPAM" || l === "TRASH")) messages.push({ id: m.id, threadId: m.threadId });
+    }
+  }
+  const historyId = r.historyId && HISTORY_ID.test(r.historyId) ? r.historyId : startHistoryId;
+  return { messages, historyId, nextPageToken: r.nextPageToken ?? null };
+}

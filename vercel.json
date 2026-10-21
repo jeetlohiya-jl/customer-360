@@ -11,6 +11,10 @@
     {
       "path": "/api/cron/extract",
       "schedule": "* * * * *"
+    },
+    {
+      "path": "/api/cron/sync",
+      "schedule": "*/10 * * * *"
     }
   ]
 }

@@ -3,6 +3,7 @@ import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { changeRole } from "../actions";
 import { getExtractConfig } from "@/lib/extract/config";
 import { retryFailedExtraction } from "../facts/actions";
+import { getSyncConfig } from "@/lib/sync/config";
 
 type UserRow = { id: string; email: string; role: string; status: string; created_at: string };
 type AuditRow = { id: number; at: string; action: string; target: string | null; actor_email: string | null };
@@ -28,6 +29,11 @@ export default async function AdminPage({
   const failures = (failuresData ?? []) as { code: string; failed: number; retrying: number }[];
   type ExtractRow = { month: string; cap_usd: number; spent_usd: number; reserved_usd: number; paused: boolean; pending: number; extracted: number; skipped: number; failed: number; needs_reconnect: number; facts_auto: number; facts_needs_review: number; facts_reviewed: number };
   const ex = ((extraction ?? []) as ExtractRow[])[0];
+  const syncOn = getSyncConfig().enabled;
+  const { data: syncData } = syncOn ? await supabase.rpc("sync_overview") : { data: null };
+  type SyncRow = { mailbox_email: string; mode: string; last_synced_at: string | null; last_push_at: string | null; watch_expires_at: string | null; processed: number; linked: number; last_error: string | null };
+  const syncRows = (syncData ?? []) as SyncRow[];
+  const when = (v: string | null) => (v ? new Date(v).toISOString().replace("T", " ").slice(0, 16) : "never");
   type ScanRow = { mailbox_email: string; status: string; created_at: string; finished_at: string | null; enumerated: number; matched: number; in_review: number; unmatched: number; failed: number; excluded: number };
 
   return (
@@ -144,6 +150,29 @@ export default async function AdminPage({
           {ex.failed ? (
             <form action={retryFailedExtraction} className="card-actions"><button type="submit" className="btn-secondary">Retry failed emails</button></form>
           ) : null}
+        </section>
+      ) : null}
+
+      {syncOn ? (
+        <section className="card section">
+          <span className="eyebrow">New email sync · counts only</span>
+          {syncRows.length === 0 ? (
+            <p className="muted mt-16">No mailbox is synced yet. A mailbox starts syncing once its scan has completed.</p>
+          ) : (
+            <div className="table-wrap mt-16">
+              <table>
+                <thead><tr><th>Mailbox</th><th>Mode</th><th>Last sync (UTC)</th><th>Last push (UTC)</th><th>Watch until</th><th>Emails checked</th><th>Linked</th><th>Last error</th></tr></thead>
+                <tbody>
+                  {syncRows.map((r) => (
+                    <tr key={r.mailbox_email}>
+                      <td>{r.mailbox_email}</td><td>{r.mode}</td><td>{when(r.last_synced_at)}</td><td>{when(r.last_push_at)}</td>
+                      <td>{when(r.watch_expires_at)}</td><td>{r.processed}</td><td>{r.linked}</td><td>{r.last_error ? <code>{r.last_error}</code> : ""}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
         </section>
       ) : null}
 

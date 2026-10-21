@@ -183,7 +183,7 @@ describe("Stage 3.1 scan, end to end on a synthetic mailbox", () => {
     const { rows } = await admin.query(
       "select ri.observed, (select count(*)::int from private.review_occurrences o where o.review_item_id = ri.id) as msgs from private.review_items ri",
     );
-    expect(rows).toEqual([{ observed: "acme packagng", msgs: (await admin.query("select in_review from private.scan_jobs")).rows[0].in_review }]);
+    expect(rows).toEqual([{ observed: "acme packagng", msgs: (await admin.query("select in_review from private.scan_jobs where owner_id = $1", [OWNER])).rows[0].in_review }]);
   });
 
   it("stores no subject, snippet or unrelated email anywhere in the database", async () => {

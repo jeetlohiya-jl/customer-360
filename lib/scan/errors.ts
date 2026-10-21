@@ -33,6 +33,10 @@ export type ScanStage =
   | "db_reserve"
   | "model"
   | "db_settle"
+  // Gmail sync (lib/sync/run.ts)
+  | "gmail_watch"
+  | "gmail_profile"
+  | "gmail_history"
   | "unknown";
 
 /** Wraps an error with the step it happened in. The cause is kept for code only. */
