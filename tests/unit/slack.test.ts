@@ -2,7 +2,7 @@ import { createHmac } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import { parseServerEnv } from "@/lib/env";
 import { ModelError } from "@/lib/extract/model";
-import { buildAnswerPrompt, isHelp, pickCustomers, renderAnswer, wantsSourceOwner, type SlackFact } from "@/lib/slack/answer";
+import { buildAnswerPrompt, isHelp, noTopicFacts, pickCustomers, renderAnswer, selectFacts, topicTypes, wantsSourceOwner, type SlackFact } from "@/lib/slack/answer";
 import { SlackError } from "@/lib/slack/api";
 import { parseSlackConfig } from "@/lib/slack/config";
 import { answerReservationMicroUsd } from "@/lib/slack/model";
@@ -84,34 +84,50 @@ describe("question handling (pure)", () => {
     expect(picked.map((p) => p.customer_id).sort()).toEqual(["a", "b"]);
   });
 
-  it("the prompt holds the question and the facts with their review state", () => {
-    const p = buildAnswerPrompt("What did we quote?", [{ customer_id: "c1", customer_name: "Acme Foods", matched: "acme foods" }],
-      [fact(), fact({ fact_id: "f2", review_state: "needs_review", stale: true })], "2026-10-21");
-    expect(p).toContain("F1 | 12 Sep 2026 | Acme Foods | pricing/proposal");
-    expect(p).toContain("UNVERIFIED");
-    expect(p).toContain("STALE");
+  const ACME = [{ customer_id: "c1", customer_name: "Acme Foods", matched: "acme foods" }];
+
+  it("the prompt is compact: one line per fact, review state and staleness, no quotes", () => {
+    const p = buildAnswerPrompt("What did we quote?", ACME, [fact(), fact({ fact_id: "f2", review_state: "needs_review", stale: true })], "2026-10-21");
+    expect(p).toContain("F1 | 12 Sep 2026 | pricing/proposal | open | 1012 tray, 0.21 USD FOB | Cirkla quoted $0.21 per tray FOB.");
+    expect(p).toContain("UNVERIFIED | STALE");
+    expect(p).not.toContain("we can offer"); // evidence quotes stay on the Facts page
     expect(p).toContain("What did we quote?");
   });
 
-  it("renders citations as numbered sources, drops invented ones and escapes Slack markup", () => {
-    const facts = [fact(), fact({ fact_id: "f2", review_state: "needs_review", evidence_quote: "PO <attached>", is_mine: true, gmail_message_id: "18c2f0a1b2c3d4e5", mailbox_email: "ann@gocirkla.com" })];
-    const out = renderAnswer("Quoted $0.21 [F1]. PO came in [F2][F9]. <!channel>", facts, { showOwner: false });
-    expect(out.cited).toBe(2);
-    expect(out.text).toContain("Quoted $0.21 [1]. PO came in [2]. &lt;!channel&gt;");
-    expect(out.text).toContain("[1] 12 Sep 2026 · Acme Foods · _“we can offer $0.21/tray FOB”_");
-    expect(out.text).toContain("_“PO &lt;attached&gt;”_ · *unverified* · <https://mail.google.com/mail/?authuser=ann%40gocirkla.com#all/18c2f0a1b2c3d4e5|open email>");
-    expect(out.text).not.toContain("[F9]");
+  it("finds the question's topic from plain words", () => {
+    expect(topicTypes("latest update of premio pricing?")).toEqual(["pricing"]);
+    expect(topicTypes("any quality complaints from Acme")).toEqual(["quality_issue"]);
+    expect(topicTypes("when does the container ship")).toEqual(["delivery"]);
+    expect(topicTypes("Recent updates from fieldale?")).toEqual([]);
   });
 
-  it("names the source colleague only when asked, and links Gmail only for the asker's own emails", () => {
-    const facts = [fact({ source_owner_email: "ann@gocirkla.com" })];
-    expect(renderAnswer("x [F1]", facts, { showOwner: false }).text).not.toContain("ann@");
-    expect(renderAnswer("x [F1]", facts, { showOwner: true }).text).toContain("from ann@gocirkla.com's mailbox");
-    expect(renderAnswer("x [F1]", facts, { showOwner: true }).text).not.toContain("mail.google.com");
+  it("sends only relevant, de-duplicated facts, newest first, at most 25", () => {
+    const many = Array.from({ length: 40 }, (_, i) => fact({ fact_id: `p${i}`, summary: `Quote ${i}`, evidence_quote: `quote ${i}` }));
+    expect(selectFacts(many, [])).toHaveLength(25);
+    const dupes = [fact({ fact_id: "a" }), fact({ fact_id: "b", summary: "Other words" }), fact({ fact_id: "c", evidence_quote: null, summary: "Cirkla quoted $0.21 per tray FOB." })];
+    expect(selectFacts(dupes, []).map((f) => f.fact_id)).toEqual(["a"]); // same quote, same summary: one fact
+    const mixed = [fact({ fact_id: "d", fact_type: "delivery", summary: "Ships 3 Nov", evidence_quote: "ships" }), fact({ fact_id: "p" })];
+    expect(selectFacts(mixed, ["pricing"]).map((f) => f.fact_id)).toEqual(["p"]);
+  });
+
+  it("the reply is short: customer, answer without fact ids, one evidence link", () => {
+    const facts = [fact(), fact({ fact_id: "f2", summary: "PO came in", evidence_quote: "PO attached" })];
+    const out = renderAnswer("Quoted $0.21/tray FOB.\n• 12 Sep: quoted $0.21 [F1]\n• 13 Sep: PO came in (unverified) [F2, UNVERIFIED][F9] <!channel>", facts,
+      { customers: ACME, appUrl: "https://c360.example/" });
+    expect(out.cited).toBe(2);
+    expect(out.text).toBe(
+      "*Acme Foods*\nQuoted $0.21/tray FOB.\n• 12 Sep: quoted $0.21\n• 13 Sep: PO came in (unverified) &lt;!channel&gt;\n" +
+      "_From 2 stored facts · <https://c360.example/facts?customer=c1|evidence and sources>_");
+  });
+
+  it("no facts on the asked topic: a direct reply with the latest activity, no AI call needed", () => {
+    const text = noTopicFacts([{ customer_id: "c9", customer_name: "Premio Foods", matched: "premio" }], ["pricing"],
+      fact({ customer_name: "Premio Foods", summary: "Asked for an intro call", message_at: "2024-10-27T10:00:00Z" }), "https://c360.example");
+    expect(text).toBe("*Premio Foods*\nNo pricing facts are stored for Premio Foods.\nLatest activity: 27 Oct 2024: Asked for an intro call\n_<https://c360.example/facts?customer=c9|All facts for this customer>_");
   });
 
   it("an answer costs well under a cent and its reservation stays inside the database's per-call limit", () => {
-    const worst = answerReservationMicroUsd(45_000);
+    const worst = answerReservationMicroUsd(12_000);
     expect(worst).toBeLessThanOrEqual(100_000);
     expect(worst).toBeLessThan(10_000); // < $0.01 even in the worst case
   });
@@ -178,8 +194,8 @@ describe("answering a DM", () => {
   it("answers from stored facts with sources, charges the budget and logs no question text", async () => {
     const h = harness();
     expect(await handleDm(h.deps, ev)).toBe("answered");
-    expect(h.posts[0]).toContain("Cirkla quoted $0.21 per tray FOB [1].");
-    expect(h.posts[0]).toContain("*Sources*");
+    expect(h.posts[0]).toContain("*Acme Foods*\nCirkla quoted $0.21 per tray FOB.");
+    expect(h.posts[0]).toContain("|evidence and sources>");
     expect(h.settled).toHaveLength(1);
     expect(h.prompts[0]).not.toContain("415 555 0134"); // the question is redacted before it leaves
     const logs = h.logs.join("\n");
@@ -217,6 +233,21 @@ describe("answering a DM", () => {
     h.deps.slack.userEmail = async () => { throw new SlackError("missing_scope", 200); };
     expect(await handleDm(h.deps, ev)).toBe("error");
     expect(h.posts).toEqual([`${MESSAGES.error} (ref: slack:missing_scope)`]);
+  });
+
+  it("the customer has facts, but none on the asked topic: answered directly, no AI call", async () => {
+    const h = harness({ facts: async () => [fact({ fact_type: "delivery", summary: "Ships 3 Nov" })] });
+    expect(await handleDm(h.deps, ev)).toBe("no_topic_facts");
+    expect(h.posts[0]).toContain("No pricing facts are stored for Acme Foods.");
+    expect(h.prompts).toHaveLength(0);
+  });
+
+  it("a customer name that contains a topic word is not taken as the topic", async () => {
+    const h = harness({
+      customers: async () => [{ customer_id: "c2", customer_name: "Quality Meats Inc", matched: "quality meats" }],
+      facts: async () => [fact({ customer_name: "Quality Meats Inc", fact_type: "order", summary: "PO 77 for 900 cases" })],
+    });
+    expect(await handleDm(h.deps, { ...ev, text: "anything new from Quality Meats?" })).toBe("answered");
   });
 
   it("help needs no AI call", async () => {

@@ -9,7 +9,7 @@ import { costMicroUsd, ModelError, type Usage } from "@/lib/extract/model";
 import { MODEL_ID } from "@/lib/extract/prompt";
 import { redact } from "@/lib/extract/redact";
 import { errorCode } from "@/lib/scan/errors";
-import { buildAnswerPrompt, factsForPrompt, HELP_TEXT, isHelp, pickCustomers, renderAnswer, wantsSourceOwner, type CustomerMatch, type SlackFact } from "./answer";
+import { buildAnswerPrompt, HELP_TEXT, isHelp, noTopicFacts, pickCustomers, renderAnswer, selectFacts, topicTypes, wantsSourceOwner, type CustomerMatch, type SlackFact } from "./answer";
 import { SlackError, type SlackApi } from "./api";
 import { answerReservationMicroUsd, type AnswerModel } from "./model";
 
@@ -40,7 +40,7 @@ export interface DmEvent {
 }
 
 export type DmOutcome =
-  | "duplicate" | "not_allowed" | "help" | "rate_limited" | "no_customer" | "no_facts" | "budget" | "answered" | "error";
+  | "duplicate" | "not_allowed" | "help" | "rate_limited" | "no_customer" | "no_facts" | "no_topic_facts" | "budget" | "answered" | "error";
 
 export const MESSAGES = {
   notAllowed: (appUrl: string) =>
@@ -89,11 +89,18 @@ export async function handleDm(deps: SlackDeps, ev: DmEvent): Promise<DmOutcome>
 
     const showOwner = wantsSourceOwner(question);
     const all = await deps.db.facts(who.user_id, customers.map((c) => c.customer_id), showOwner, 120);
-    const facts = factsForPrompt(all);
-    counts.facts = facts.length;
-    if (facts.length === 0) {
+    if (all.length === 0) {
       await reply(MESSAGES.noFacts(customers.map((c) => c.customer_name).join(", ")));
       return (outcome = "no_facts");
+    }
+    // Topic words come from the question minus the customer's name ("Quality Meats" is not a quality question).
+    const types = topicTypes(customers.reduce((q, c) => q.replace(new RegExp(c.matched.split(" ").map((w) => w.replace(/[^a-z0-9]/g, "")).filter(Boolean).join("[^a-z0-9]+"), "gi"), " "), question));
+    const facts = selectFacts(all, types);
+    counts.facts = facts.length;
+    if (facts.length === 0) {
+      // The customer has facts, just none on this topic: say so without an AI call.
+      await reply(noTopicFacts(customers, types, all[0], deps.appUrl));
+      return (outcome = "no_topic_facts");
     }
 
     const prompt = buildAnswerPrompt(question, customers, facts, deps.today ?? new Date().toISOString().slice(0, 10));
@@ -117,11 +124,9 @@ export async function handleDm(deps: SlackDeps, ev: DmEvent): Promise<DmOutcome>
     await deps.db.settle(res, { ...result.usage, actual_microusd: cost, model: MODEL_ID });
     counts.cost_microusd = cost;
 
-    const rendered = renderAnswer(result.text, facts, { showOwner });
+    const rendered = renderAnswer(result.text, facts, { customers, appUrl: deps.appUrl });
     counts.cited = rendered.cited;
-    // When the name was only partly given, say which customer(s) the answer is about.
-    const about = customers.some((c) => c.match_kind === "partial") ? `_About ${customers.map((c) => c.customer_name).join(", ")}:_\n` : "";
-    await reply(about + rendered.text);
+    await reply(rendered.text);
     return (outcome = "answered");
   } catch (e) {
     const code = (

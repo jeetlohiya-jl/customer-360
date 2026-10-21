@@ -73,13 +73,14 @@ describe("Slack DM assistant end to end", () => {
     expect(prompts).toHaveLength(0);
   });
 
-  it("the mailbox owner gets an answer with sources, own Gmail links and unverified marks; the cost is settled", async () => {
-    expect(await ask("U0E5ANN", "What have we quoted acmeport fresh meats?", "EvE5b")).toBe("answered");
+  it("the mailbox owner gets a short answer with an evidence link, her unverified facts included; the cost is settled", async () => {
+    expect(await ask("U0E5ANN", "What's new with acmeport fresh meats?", "EvE5b")).toBe("answered");
     const text = posts.at(-1)!.text;
-    expect(text).toContain("[1]");
-    expect(text).toContain("*unverified*");
-    expect(text).toContain("mail.google.com");
+    expect(text.startsWith("*Acmeport Fresh Meats LLC*\n")).toBe(true);
+    expect(text).toContain(`/facts?customer=${ACME}|evidence and sources>`);
+    expect(text).not.toMatch(/\[F\d/);
     expect(prompts[0]).toContain("Acmeport Fresh Meats LLC");
+    expect(prompts[0]).toContain("UNVERIFIED");
     const linked = (await admin.query("select slack_user_id from public.app_users where id = $1", [ANN])).rows[0];
     expect(linked.slack_user_id).toBe("U0E5ANN");
     const usageRow = (await admin.query("select status, actual_microusd from private.ai_usage order by created_at desc limit 1")).rows[0];
@@ -89,7 +90,7 @@ describe("Slack DM assistant end to end", () => {
 
   it("a retry of the same Slack event is ignored", async () => {
     const before = posts.length;
-    expect(await ask("U0E5ANN", "What have we quoted acmeport fresh meats?", "EvE5b")).toBe("duplicate");
+    expect(await ask("U0E5ANN", "What's new with acmeport fresh meats?", "EvE5b")).toBe("duplicate");
     expect(posts.length).toBe(before);
   });
 
@@ -99,10 +100,10 @@ describe("Slack DM assistant end to end", () => {
     const n = prompts.length;
     expect(await ask("U0E5BEN", "what's open with Acmeport Fresh Meats", "EvE5d")).toBe("answered");
     const prompt = prompts[n];
-    expect(prompt).toContain("we can offer $0.21/tray FOB");
+    expect(prompt).toContain("Cirkla quoted $0.21 per tray FOB");
     expect(prompt).not.toContain("5,000 cases"); // awaiting review: owner and admins only
     expect(prompt).not.toContain("e5.ann@"); // not asked who
-    expect(posts.at(-1)!.text).not.toContain("mail.google.com"); // not his mailbox
+    expect(posts.at(-1)!.text).not.toContain("mail.google.com");
   });
 
   it("asking who brings in the source mailbox (D2)", async () => {
@@ -113,7 +114,14 @@ describe("Slack DM assistant end to end", () => {
 
   it("the first word of a name is enough, and the reply says which customer it is about", async () => {
     expect(await ask("U0E5ANN", "anything new from acmeport?", "EvE5g")).toBe("answered");
-    expect(posts.at(-1)!.text.startsWith("_About Acmeport Fresh Meats LLC:_")).toBe(true);
+    expect(posts.at(-1)!.text.startsWith("*Acmeport Fresh Meats LLC*")).toBe(true);
+  });
+
+  it("a topic with no stored facts is answered without an AI call", async () => {
+    const n = prompts.length;
+    expect(await ask("U0E5ANN", "any quality complaints from acmeport?", "EvE5h")).toBe("no_topic_facts");
+    expect(posts.at(-1)!.text).toContain("No quality issue facts are stored");
+    expect(prompts.length).toBe(n);
   });
 
   it("no customer named: a short question back, no model call", async () => {
