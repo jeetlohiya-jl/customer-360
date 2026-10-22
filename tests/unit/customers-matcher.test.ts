@@ -47,8 +47,50 @@ describe("exact names, case, punctuation, suffixes, aliases", () => {
   });
 });
 
+describe("m2: obvious variants of one customer's name link directly", () => {
+  it.each([
+    ["AcmePackaging", "words run together"],
+    ["RE: acmepackaging order", "words run together in a subject"],
+    ["Bravo Food", "plural dropped"],
+    ["Bravo Foods's samples", "possessive"],
+  ])("%s links (%s)", (line) => {
+    const d = outcome(line);
+    expect(d.outcome).toBe("link");
+  });
+
+  it("run-together letters shared by two customers still go to review", () => {
+    const twin = buildIndex({
+      customers: [
+        { id: ACME, canonicalName: "Taylor Farms", status: "active", names: [], domains: [], emails: [] },
+        { id: BRAVO, canonicalName: "Taylorf Arms", status: "active", names: [], domains: [], emails: [] },
+      ],
+      distinctions: [], rejections: [],
+    });
+    expect(checkLine(twin, "taylorfarms").decision.outcome).toBe("review");
+  });
+
+  it("a domain that IS the customer's name links; one letter off is still only a look-alike", () => {
+    const plain = buildIndex({
+      customers: [{ id: ACME, canonicalName: "Premio Foods", status: "active", names: [], domains: [], emails: [] }],
+      distinctions: [], rejections: [], workspaceDomain: "gocirkla.com",
+    });
+    expect(matchAddress(plain, "greg@premiofoods.com")?.evidence).toBe("E2");
+    expect(checkLine(plain, "greg@premiofoods.com").decision.outcome).toBe("link");
+    expect(matchAddress(plain, "greg@premofoods.com")?.evidence).toBe("E5");
+  });
+
+  it("a generic name never links from spacing or plural alone", () => {
+    const generic = buildIndex({
+      customers: [{ id: ACME, canonicalName: "Fresh Foods", status: "active", names: [], domains: [], emails: [] }],
+      distinctions: [], rejections: [],
+    });
+    expect(checkLine(generic, "freshfoods").decision.outcome).not.toBe("link");
+    expect(checkLine(generic, "Fresh Food").decision.outcome).not.toBe("link");
+  });
+});
+
 describe("spelling mistakes go to review, never link", () => {
-  it.each(["Acme Packagng", "Acme Packagin", "Acem Packaging", "AcmePackaging"])("%s -> review for Acme", (line) => {
+  it.each(["Acme Packagng", "Acme Packagin", "Acem Packaging"])("%s -> review for Acme", (line) => {
     const d = outcome(line);
     expect(d.outcome).toBe("review");
     expect(d.customerIds).toEqual([ACME]);
@@ -117,6 +159,6 @@ describe("decide()", () => {
     expect(decide([], []).outcome).toBe("none");
   });
   it("records the rules version for later re-runs", () => {
-    expect(decide([], []).rulesVersion).toBe("m1");
+    expect(decide([], []).rulesVersion).toBe("m2");
   });
 });

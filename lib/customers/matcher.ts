@@ -5,7 +5,14 @@
  *  - Exact canonical names and approved aliases are strong name evidence (E3),
  *    unless the name is generic (no distinctive word).
  *  - Typos are only ever *candidates* (E4): they go to review, never link.
+ *    m2 exceptions (unambiguous, so strong E3): the same name with the spaces
+ *    removed or added ("taylorfarms" = "Taylor Farms") and a plural or
+ *    possessive "s" on the last word ("loblaws" = "Loblaw"), when the name is
+ *    distinctive and only ONE customer has it.
  *  - Approved addresses (E1) and verified exclusive domains (E2) are strong.
+ *    m2: a domain whose name IS a customer's distinctive name, exactly
+ *    ("premiofoods.com" for "Premio Foods"), is strong too when only one
+ *    customer has that name. One letter off is still only a look-alike (E5).
  *    Shared domains and look-alike domains (E5) only send to review.
  *  - Two or more customers in one item always means review.
  *  - Nothing here creates customers, aliases or merges.
@@ -19,7 +26,7 @@ import {
 } from "./normalize";
 import { allowedEdits, deletionKeys, editDistance } from "./similarity";
 
-export const RULES_VERSION = "m1";
+export const RULES_VERSION = "m2";
 
 export type NameKind = "canonical" | "legal" | "trading" | "alias";
 
@@ -190,6 +197,28 @@ function fuzzyEntryMatch(gram: string[], entry: Entry): number | null {
   return 1 - total / entry.compact.length;
 }
 
+/** m2: the same words except a plural or possessive "s" on the last word ("loblaws" / "loblaw"). */
+function pluralMatch(gram: string[], entry: Entry): boolean {
+  if (entry.generic || gram.length !== entry.tokens.length || entry.compact.length < 5) return false;
+  const n = gram.length - 1;
+  for (let i = 0; i < n; i++) if (gram[i] !== entry.tokens[i]) return false;
+  const a = gram[n];
+  const b = entry.tokens[n];
+  return a !== b && (a === `${b}s` || b === `${a}s`) && Math.min(a.length, b.length) >= 4;
+}
+
+/** How many different customers a plural/possessive variant could belong to. */
+function pluralOwners(index: MatcherIndex, gram: string[]): number {
+  const owners = new Set<string>();
+  const last = gram[gram.length - 1];
+  const head = gram.slice(0, -1);
+  for (const variant of [last.endsWith("s") ? last.slice(0, -1) : null, `${last}s`]) {
+    if (!variant) continue;
+    for (const e of index.exact.get([...head, variant].join(" ")) ?? []) owners.add(e.customerId);
+  }
+  return owners.size;
+}
+
 /** Finds customer names (exact and likely typos) anywhere in a short text such as a subject line. */
 export function findNames(index: MatcherIndex, text: string, opts: { exclude?: string } = {}): NameHit[] {
   const tokens = tokenize(text).slice(0, 60);
@@ -234,6 +263,10 @@ export function findNames(index: MatcherIndex, text: string, opts: { exclude?: s
         for (const idx of candidates) {
           const entry = index.entries[idx];
           if (entry.customerId === opts.exclude) continue;
+          if (pluralMatch(gram, entry) && pluralOwners(index, gram) === 1) {
+            fuzzy.push({ customerId: entry.customerId, observed: key, matched: entry.normalized, evidence: "E3", score: 0.98, start: i, end: i + k });
+            continue;
+          }
           const score = fuzzyEntryMatch(gram, entry);
           if (score !== null) {
             fuzzy.push({ customerId: entry.customerId, observed: key, matched: entry.normalized, evidence: "E4", score, start: i, end: i + k });
@@ -243,9 +276,12 @@ export function findNames(index: MatcherIndex, text: string, opts: { exclude?: s
       // Words run together or split apart: "acmepackaging" vs "acme packaging".
       const compactKey = gram.join("");
       if (compactKey.length >= 6) {
-        for (const entry of index.compact.get(compactKey) ?? []) {
+        const sameLetters = index.compact.get(compactKey) ?? [];
+        const unambiguous = new Set(sameLetters.map((e) => e.customerId)).size === 1;
+        for (const entry of sameLetters) {
           if (entry.generic || entry.tokens.length === k || entry.customerId === opts.exclude) continue;
-          fuzzy.push({ customerId: entry.customerId, observed: key, matched: entry.normalized, evidence: "E4", score: 0.97, start: i, end: i + k });
+          // m2: only the spacing differs and only one customer has these letters: as good as exact.
+          fuzzy.push({ customerId: entry.customerId, observed: key, matched: entry.normalized, evidence: unambiguous ? "E3" : "E4", score: 0.97, start: i, end: i + k });
         }
       }
     }
@@ -284,6 +320,13 @@ export function matchAddress(index: MatcherIndex, rawAddress: string): AddressHi
 
   // Look-alike: the domain's first label resembles a customer name ("acmepack" for "Acme Pack").
   const label = domain.split(".")[0].replace(/-/g, "");
+  if (label.length >= 6) {
+    // m2: the domain is exactly a customer's distinctive name, and only one customer's.
+    const owners = new Set((index.compact.get(label) ?? []).filter((e) => !e.generic).map((e) => e.customerId));
+    if (owners.size === 1 && new Set((index.compact.get(label) ?? []).map((e) => e.customerId)).size === 1) {
+      return { customerId: [...owners][0], address, evidence: "E2" };
+    }
+  }
   if (label.length >= 5) {
     for (const e of index.entries) {
       if (e.generic || e.compact.length < 5) continue;
