@@ -3,7 +3,7 @@
  * Versioned: every stored fact records PROMPT_VERSION.
  */
 
-export const PROMPT_VERSION = "x3";
+export const PROMPT_VERSION = "x4";
 export const MODEL_ID = "claude-haiku-5-5";
 export const MAX_OUTPUT_TOKENS = 1500;
 
@@ -40,7 +40,7 @@ Earlier open facts for this customer are listed with their ids. If this email re
 Rules:
 - Use only information in this email. Never guess numbers, dates, prices or currencies. Leave a field null when it is not stated.
 - evidence_quote: copy at most 200 characters VERBATIM from the email that supports the fact. Do not paraphrase inside the quote.
-- summary: one plain sentence, at most 300 characters.
+- summary: one plain sentence, at most 300 characters. Name the person who said, asked or agreed it when the email shows who (greeting or sign-off), with their company: "Greg (Premio Foods) asked for…", "Glenn (Cirkla) confirmed…". Never invent a name; if it is not clear who, use the company name.
 - Text shown as [EMAIL], [PHONE], [CARD], [BANK], [GOV_ID], [SECRET], [LINK], [IBAN] or [IFSC] was removed on purpose. Never try to restore it.
 - Do not extract anything about people's health, family, personal life, salaries, immigration, legal disputes or HR matters. Skip those parts entirely.
 - confidence: 0 to 1, how sure you are that the fact, its stance and its numbers are right. Use the full range: 0.9 or more when the email states it plainly, around 0.6 when you are interpreting, below 0.5 when unsure.

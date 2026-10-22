@@ -2,7 +2,7 @@ import { createHmac } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import { parseServerEnv } from "@/lib/env";
 import { ModelError } from "@/lib/extract/model";
-import { buildAnswerPrompt, isHelp, noTopicFacts, pickCustomers, renderAnswer, selectFacts, topicTypes, wantsSourceOwner, type SlackFact } from "@/lib/slack/answer";
+import { buildAnswerPrompt, isHelp, noTopicFacts, personName, pickCustomers, renderAnswer, selectFacts, topicTypes, wantsLatest, wantsSourceOwner, type SlackFact } from "@/lib/slack/answer";
 import { SlackError } from "@/lib/slack/api";
 import { parseSlackConfig } from "@/lib/slack/config";
 import { answerReservationMicroUsd } from "@/lib/slack/model";
@@ -88,10 +88,30 @@ describe("question handling (pure)", () => {
 
   it("the prompt is compact: one line per fact, review state and staleness, no quotes", () => {
     const p = buildAnswerPrompt("What did we quote?", ACME, [fact(), fact({ fact_id: "f2", review_state: "needs_review", stale: true })], "2026-10-21");
-    expect(p).toContain("F1 | 12 Sep 2026 | pricing/proposal | open | 1012 tray, 0.21 USD FOB | Cirkla quoted $0.21 per tray FOB.");
+    expect(p).toContain("F1 | 12 Sep 2026 | pricing/proposal | open | 1012 tray, 0.21 USD FOB | said by cirkla | Cirkla quoted $0.21 per tray FOB.");
     expect(p).toContain("UNVERIFIED | STALE");
     expect(p).not.toContain("we can offer"); // evidence quotes stay on the Facts page
     expect(p).toContain("What did we quote?");
+  });
+
+  it("names the Cirkla colleague on each fact: sender of our emails, recipient of the customer's", () => {
+    const out = buildAnswerPrompt("x", ACME, [
+      fact({ source_owner_email: "glenn.divers@gocirkla.com", direction: "outbound" }),
+      fact({ fact_id: "f2", summary: "Greg asked for samples", party: "customer", source_owner_email: "cary.newton@gocirkla.com", direction: "inbound" }),
+    ], "2026-10-22");
+    expect(out).toContain("from: Glenn Divers (Cirkla)");
+    expect(out).toContain("to: Cary Newton (Cirkla)");
+    expect(out).not.toContain("@gocirkla.com");
+    expect(personName("vaibhav@gocirkla.com")).toBe("Vaibhav");
+    expect(personName(null)).toBeNull();
+  });
+
+  it("a 'latest' question asks for one update; a history question does not", () => {
+    expect(wantsLatest("what is the latest update about premio?")).toBe(true);
+    expect(wantsLatest("where do we stand with Fieldale")).toBe(true);
+    expect(wantsLatest("last 3 updates from fieldale")).toBe(false);
+    expect(wantsLatest("summarise all pricing for premio")).toBe(false);
+    expect(buildAnswerPrompt("latest?", ACME, [fact()], "2026-10-22", { latest: true })).toContain("Answer style: LATEST.");
   });
 
   it("finds the question's topic from plain words", () => {

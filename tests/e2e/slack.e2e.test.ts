@@ -102,14 +102,15 @@ describe("Slack DM assistant end to end", () => {
     const prompt = prompts[n];
     expect(prompt).toContain("Cirkla quoted $0.21 per tray FOB");
     expect(prompt).not.toContain("5,000 cases"); // awaiting review: owner and admins only
-    expect(prompt).not.toContain("e5.ann@"); // not asked who
+    expect(prompt).toContain("from: Ann (Cirkla)"); // answers name the colleague (D2 changed 2026-10-22)
+    expect(prompt).not.toContain("e5.ann@"); // a name, never the address
     expect(posts.at(-1)!.text).not.toContain("mail.google.com");
   });
 
   it("asking who brings in the source mailbox (D2)", async () => {
     const n = prompts.length;
     expect(await ask("U0E5BEN", "Who has been emailing Acmeport Fresh Meats?", "EvE5e")).toBe("answered");
-    expect(prompts[n]).toContain("source: e5.ann@gocirkla.com");
+    expect(prompts[n]).toContain("Ann (Cirkla)");
   });
 
   it("the first word of a name is enough, and the reply says which customer it is about", async () => {

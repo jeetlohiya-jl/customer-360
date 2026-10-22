@@ -9,7 +9,7 @@ import { costMicroUsd, ModelError, type Usage } from "@/lib/extract/model";
 import { MODEL_ID } from "@/lib/extract/prompt";
 import { redact } from "@/lib/extract/redact";
 import { errorCode } from "@/lib/scan/errors";
-import { buildAnswerPrompt, HELP_TEXT, isHelp, noTopicFacts, pickCustomers, renderAnswer, selectFacts, topicTypes, wantsSourceOwner, type CustomerMatch, type SlackFact } from "./answer";
+import { buildAnswerPrompt, HELP_TEXT, isHelp, LATEST_FACTS, noTopicFacts, pickCustomers, renderAnswer, selectFacts, topicTypes, wantsLatest, type CustomerMatch, type SlackFact } from "./answer";
 import { SlackError, type SlackApi } from "./api";
 import { answerReservationMicroUsd, type AnswerModel } from "./model";
 
@@ -87,15 +87,17 @@ export async function handleDm(deps: SlackDeps, ev: DmEvent): Promise<DmOutcome>
       return (outcome = "no_customer");
     }
 
-    const showOwner = wantsSourceOwner(question);
-    const all = await deps.db.facts(who.user_id, customers.map((c) => c.customer_id), showOwner, 120);
+    // Colleagues' names are always shown (decision D2 changed 2026-10-22: answers name people).
+    const all = await deps.db.facts(who.user_id, customers.map((c) => c.customer_id), true, 120);
     if (all.length === 0) {
       await reply(MESSAGES.noFacts(customers.map((c) => c.customer_name).join(", ")));
       return (outcome = "no_facts");
     }
     // Topic words come from the question minus the customer's name ("Quality Meats" is not a quality question).
     const types = topicTypes(customers.reduce((q, c) => q.replace(new RegExp(c.matched.split(" ").map((w) => w.replace(/[^a-z0-9]/g, "")).filter(Boolean).join("[^a-z0-9]+"), "gi"), " "), question));
-    const facts = selectFacts(all, types);
+    const latest = wantsLatest(question);
+    const selected = selectFacts(all, types);
+    const facts = latest ? selected.slice(0, LATEST_FACTS) : selected;
     counts.facts = facts.length;
     if (facts.length === 0) {
       // The customer has facts, just none on this topic: say so without an AI call.
@@ -103,7 +105,7 @@ export async function handleDm(deps: SlackDeps, ev: DmEvent): Promise<DmOutcome>
       return (outcome = "no_topic_facts");
     }
 
-    const prompt = buildAnswerPrompt(question, customers, facts, deps.today ?? new Date().toISOString().slice(0, 10));
+    const prompt = buildAnswerPrompt(question, customers, facts, deps.today ?? new Date().toISOString().slice(0, 10), { latest });
     reservation = await deps.db.reserve(answerReservationMicroUsd(prompt.length));
     if (!reservation) {
       await reply(MESSAGES.budget);
