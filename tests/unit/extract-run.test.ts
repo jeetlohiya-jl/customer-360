@@ -1,9 +1,10 @@
 import { describe, expect, it } from "vitest";
 import { GmailError } from "@/lib/gmail/google";
 import { ModelError, reservationMicroUsd, costMicroUsd } from "@/lib/extract/model";
-import { runExtractTick, type ClaimedItem, type ExtractDb, type ExtractGmail } from "@/lib/extract/run";
+import { prepareMessage, runExtractTick, type ClaimedItem, type ExtractDb, type ExtractGmail } from "@/lib/extract/run";
+import { buildUserMessage } from "@/lib/extract/prompt";
 import type { CommitFact } from "@/lib/extract/validate";
-import { CASES, CUSTOMERS, OWNER_EMAIL, PLANTED } from "../fixtures/synthetic-emails";
+import { CASES, CUSTOMERS, mkMessage, OWNER_EMAIL, PLANTED } from "../fixtures/synthetic-emails";
 
 const OWNER = "00000000-0000-4000-8000-0000000000a1";
 const usage = { input_tokens: 1000, output_tokens: 400, cache_read_input_tokens: 2500, cache_creation_input_tokens: 0 };
@@ -142,6 +143,35 @@ describe("extraction run", () => {
     const sum = await runExtractTick(h.deps);
     expect(sum.failed).toBe(1);
     expect([...h.calls.fails.values()][0]).toBe("gmail_get:gmail:gmail_api_error_403");
+  });
+
+  it("an email deleted after it was linked (404) is skipped as 'deleted', not failed or retried", async () => {
+    const h = harness();
+    const get = h.deps.gmail.getMessage;
+    h.deps.gmail.getMessage = async (at, id) => {
+      if (id === h.items[0].gmail_message_id) throw new GmailError("gmail_api_error", 404, "notFound");
+      return get(at, id);
+    };
+    const sum = await runExtractTick(h.deps);
+    expect(h.calls.skips.get(h.items[0].gmail_message_id)).toBe("deleted");
+    expect(h.calls.fails.has(h.items[0].gmail_message_id)).toBe(false);
+    expect(sum.skip_reasons.deleted).toBe(1);
+  });
+
+  it("internal emails (0013) are read only when linked as internal; the prompt says they are internal", () => {
+    const body = "Hi David, please check the options for the 1C tray: we can send 200 samples once the $2000 prototype tool cost is approved. Thanks, VB";
+    const internal = mkMessage({ id: "int1", from: "VB <vb@gocirkla.com>", to: OWNER_EMAIL, subject: "RE: trays", body });
+    const base = { mailbox_email: OWNER_EMAIL, message_at: "2026-10-09T10:00:00.000Z", customers: CUSTOMERS };
+    // Linked as internal (thread or subject rule): prepared, and labelled internal for the model.
+    const ok = prepareMessage(internal, { ...base, direction: "internal" }, [], new Set());
+    expect(ok.kind).toBe("ready");
+    if (ok.kind === "ready") expect(ok.prompt).toContain("Direction: internal: between Cirkla colleagues about the customer");
+    // Any other direction keeps the internal-only exclusion.
+    expect(prepareMessage(internal, { ...base, direction: "inbound" }, [], new Set())).toEqual({ kind: "skip", reason: "excluded" });
+    // Privacy rules still apply to internal mail.
+    const priv = mkMessage({ id: "int2", from: "vb@gocirkla.com", to: OWNER_EMAIL, subject: "Confidential salary review", body });
+    expect(prepareMessage(priv, { ...base, direction: "internal" }, [], new Set())).toEqual({ kind: "skip", reason: "excluded" });
+    expect(buildUserMessage({ customers: CUSTOMERS, date: "2026-10-09", direction: "outbound", openFacts: [], text: "x" })).toContain("sent BY Cirkla to the customer");
   });
 
   it("the worst-case reservation always covers the real cost", () => {

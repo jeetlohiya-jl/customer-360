@@ -4,7 +4,7 @@ import { z } from "zod";
 import { requireAdmin } from "@/lib/auth/session";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { getExtractConfig } from "@/lib/extract/config";
-import { addAlias, addIdentifier, removeAlias, removeIdentifier, setStatus, unmarkDistinct } from "../actions";
+import { addAlias, addIdentifier, backfillCustomer, removeAlias, removeIdentifier, setStatus, unmarkDistinct } from "../actions";
 
 const OK: Record<string, string> = {
   alias: "Name added.",
@@ -13,6 +13,7 @@ const OK: Record<string, string> = {
   identifier_removed: "Domain or email removed.",
   status: "Status updated.",
   distinct_removed: "The two customers may be proposed as matches again.",
+  backfill: "Search queued: each approved mailbox will be checked for this customer's past email (a few minutes per mailbox).",
 };
 
 export default async function CustomerPage({
@@ -115,6 +116,13 @@ export default async function CustomerPage({
             </label>
             <button type="submit" className="btn-secondary">Add</button>
           </form>
+          {customer.status === "active" ? (
+            <form action={backfillCustomer} className="form-row">
+              <input type="hidden" name="customerId" value={customer.id} />
+              <button type="submit" className="btn-secondary">Find past emails</button>
+              <span className="fine">After adding a domain, email or name: re-checks every approved mailbox for this customer only.</span>
+            </form>
+          ) : null}
         </div>
       </div>
 

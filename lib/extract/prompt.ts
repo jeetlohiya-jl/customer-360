@@ -3,7 +3,7 @@
  * Versioned: every stored fact records PROMPT_VERSION.
  */
 
-export const PROMPT_VERSION = "x4";
+export const PROMPT_VERSION = "x5";
 export const MODEL_ID = "claude-haiku-5-5";
 export const MAX_OUTPUT_TOKENS = 1500;
 
@@ -32,6 +32,7 @@ Stance (be strict; this matters most):
 - cancellation: something is withdrawn, put on hold or cancelled.
 
 party: who made the statement: customer, cirkla or unclear. Direction tells you who sent the email.
+Internal emails (Direction: internal) are between Cirkla colleagues about the customer and were not sent to the customer. Record Cirkla's own decisions, plans, prices worked out, sample and shipping arrangements and actions owed by named colleagues (party: cirkla). A customer's statement quoted inside an internal email is still party customer. Never record colleagues' opinions of people, internal disagreements or anything personal.
 basis: explicit if the email states it directly; inferred if you are reading between the lines.
 status: open, resolved, cancelled, not_applicable or unknown. status_basis: explicit, inferred, or none when status is unknown or not_applicable.
 
@@ -89,7 +90,7 @@ export const OUTPUT_SCHEMA = {
 export interface PromptInput {
   customers: { id: string; name: string }[];
   date: string; // YYYY-MM-DD
-  direction: "inbound" | "outbound";
+  direction: "inbound" | "outbound" | "internal";
   openFacts: { id: string; customer_id: string; type: string; summary: string; date: string }[];
   /** Cleaned, REDACTED email text. */
   text: string;
@@ -107,7 +108,10 @@ export function buildUserMessage(p: PromptInput): string {
     : "- none";
   return [
     `Customer(s) this email is linked to:\n${customers}`,
-    `Email date: ${p.date}. Direction: ${p.direction === "inbound" ? "sent BY the customer to Cirkla" : "sent BY Cirkla to the customer"}.`,
+    `Email date: ${p.date}. Direction: ${
+      p.direction === "inbound" ? "sent BY the customer to Cirkla"
+      : p.direction === "internal" ? "internal: between Cirkla colleagues about the customer, not sent to the customer"
+      : "sent BY Cirkla to the customer"}.`,
     `Earlier open facts for these customers:\n${open}`,
     ...(p.subject ? [`Subject: ${p.subject}`] : []),
     `Email text (cleaned and redacted):\n<<<\n${p.text}\n>>>`,

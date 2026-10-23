@@ -5,7 +5,7 @@
  */
 import { Client } from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import type { MessageHeaders } from "@/lib/gmail/google";
+import { GmailError, type MessageHeaders } from "@/lib/gmail/google";
 import { createSyncDb } from "@/lib/sync/db";
 import { runSyncTick, type SyncGmail } from "@/lib/sync/run";
 
@@ -32,6 +32,7 @@ const gmail: SyncGmail = {
   },
   listHistory: async () => ({ messages: history.map((id) => ({ id })), historyId: "9100", nextPageToken: null }),
   getHeaders: async (_at, id) => mail.get(id)!,
+  getThread: async (_at, threadId) => [...mail.values()].filter((m) => m.threadId === threadId),
   getHistoryId: async () => "9000",
   watch: async () => ({ historyId: "9000", expiration: new Date(NOW + 7 * DAY).toISOString() }),
 };
@@ -103,5 +104,40 @@ describe("Gmail sync end to end", () => {
   it("nothing to do: the safety net leaves a live, recently synced mailbox alone", async () => {
     const { sum } = await tick(ANN);
     expect(sum.mailboxes).toBe(0);
+  });
+
+  it("0013: internal replies in a customer thread and internal mail naming the customer are linked as internal; a vanished email is skipped", async () => {
+    await admin.query("update private.settings set value = 'thread_and_named' where key = 'internal_linking'");
+    try {
+      // Internal reply in e6m4's thread, a colleague's email naming the customer, one email deleted before it is fetched.
+      mail.set("e6r1", { ...mk("e6r1", NOW + 1000, "VB <vb@gocirkla.com>"), threadId: "te6m4", headers: { from: "VB <vb@gocirkla.com>", to: MAILBOX, subject: "RE: PO update" } });
+      mail.set("e6i1", { ...mk("e6i1", NOW + 2000, "CRM <crm@gocirkla.com>"), headers: { from: "CRM <crm@gocirkla.com>", to: MAILBOX, subject: "[Ticket] - E6 Sixfold Poultry samples" } });
+      mail.set("e6x1", { ...mk("e6x1", NOW + 3000, "VB <vb@gocirkla.com>"), headers: { from: "VB <vb@gocirkla.com>", to: MAILBOX, subject: "lunch?" } });
+      history = ["e6r1", "e6i1", "e6x1", "e6gone"];
+      const get = gmail.getHeaders;
+      gmail.getHeaders = async (at, id) => {
+        if (id === "e6gone") throw new GmailError("gmail_api_error", 404, "notFound");
+        return get(at, id);
+      };
+      const { db, close } = createSyncDb(WORKER_URL);
+      try {
+        await db.push(MAILBOX, "9200");
+      } finally {
+        await close();
+      }
+      const { sum } = await tick(ANN);
+      gmail.getHeaders = get;
+      expect(sum).toMatchObject({ synced: 1, failed: 0, gone: 1 });
+      const rows = await q<{ gmail_message_id: string; direction: string; type: string }>(
+        "select gmail_message_id, direction, evidence -> 0 ->> 'type' as type from private.message_links where owner_id = $1 and direction = 'internal' order by 1", [ANN]);
+      expect(rows).toEqual([
+        { gmail_message_id: "e6i1", direction: "internal", type: "I1" },
+        { gmail_message_id: "e6r1", direction: "internal", type: "T1" },
+      ]);
+      const pending = await q<{ n: string }>("select count(*) as n from private.extraction_state where owner_id = $1 and gmail_message_id in ('e6i1', 'e6r1') and status = 'pending'", [ANN]);
+      expect(Number(pending[0].n)).toBe(2);
+    } finally {
+      await admin.query("update private.settings set value = 'off' where key = 'internal_linking'");
+    }
   });
 });

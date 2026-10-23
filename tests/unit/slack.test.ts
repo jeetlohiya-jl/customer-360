@@ -2,7 +2,7 @@ import { createHmac } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import { parseServerEnv } from "@/lib/env";
 import { ModelError } from "@/lib/extract/model";
-import { buildAnswerPrompt, isHelp, noTopicFacts, personName, pickCustomers, renderAnswer, selectFacts, topicTypes, wantsLatest, wantsSourceOwner, type SlackFact } from "@/lib/slack/answer";
+import { buildAnswerPrompt, factLine, focusPeople, isHelp, noTopicFacts, personName, pickCustomers, renderAnswer, selectFacts, topicTypes, wantsLatest, wantsOpenItems, wantsSourceOwner, type SlackFact } from "@/lib/slack/answer";
 import { SlackError } from "@/lib/slack/api";
 import { parseSlackConfig } from "@/lib/slack/config";
 import { answerReservationMicroUsd } from "@/lib/slack/model";
@@ -119,6 +119,37 @@ describe("question handling (pure)", () => {
     expect(topicTypes("any quality complaints from Acme")).toEqual(["quality_issue"]);
     expect(topicTypes("when does the container ship")).toEqual(["delivery"]);
     expect(topicTypes("Recent updates from fieldale?")).toEqual([]);
+  });
+
+  it("next steps / actionables: every kind of open item, open ones first, nothing filtered by type", () => {
+    const q = "what does David need as next steps on Preferred Packaging? what are the actionables?";
+    expect(wantsOpenItems(q)).toBe(true);
+    expect(topicTypes(q)).toEqual([]); // not just "requirement" because the question says "need"
+    expect(wantsOpenItems("What's open with Acme Foods?")).toBe(true);
+    expect(wantsOpenItems("latest update of premio pricing?")).toBe(false);
+    const facts = [
+      fact({ fact_id: "r1", status: "resolved", summary: "Old quote", evidence_quote: "a" }),
+      fact({ fact_id: "o1", fact_type: "delivery", summary: "Pickup on 22 Oct", evidence_quote: "b" }),
+      fact({ fact_id: "o2", fact_type: "follow_up", summary: "Send 200 samples", evidence_quote: "c" }),
+    ];
+    expect(selectFacts(facts, [], { openFirst: true }).map((f) => f.fact_id)).toEqual(["o1", "o2", "r1"]);
+    expect(selectFacts(facts, []).map((f) => f.fact_id)).toEqual(["r1", "o1", "o2"]);
+    expect(buildAnswerPrompt(q, ACME, facts, "2026-10-23", { openItems: true })).toContain("list the OPEN items, who owes each");
+  });
+
+  it("a colleague named in the question becomes the answer's focus", () => {
+    const facts = [
+      fact({ source_owner_email: "david.woods@gocirkla.com" }),
+      fact({ fact_id: "f2", summary: "Umar (Cirkla) needs 4-5 weeks for samples.", source_owner_email: "glenn.divers@gocirkla.com" }),
+    ];
+    expect(focusPeople("what does David need as next steps?", facts)).toEqual(["David"]);
+    expect(focusPeople("when will Umar have the samples", facts)).toEqual(["Umar"]);
+    expect(focusPeople("what is open with Acme", facts)).toEqual([]);
+    expect(buildAnswerPrompt("what does David need?", ACME, facts, "2026-10-23", { focus: ["David"] })).toContain("Focus: the question is about David (Cirkla)");
+  });
+
+  it("internal facts say so instead of from/to the customer", () => {
+    expect(factLine(fact({ direction: "internal", source_owner_email: "david.woods@gocirkla.com" }), 0)).toContain("internal Cirkla email in David Woods's mailbox");
   });
 
   it("sends only relevant, de-duplicated facts, newest first, at most 25", () => {

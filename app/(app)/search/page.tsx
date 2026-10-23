@@ -11,7 +11,7 @@ type Row = {
   gmail_message_id: string;
   gmail_thread_id: string | null;
   message_at: string;
-  direction: "inbound" | "outbound";
+  direction: "inbound" | "outbound" | "internal";
   customer_addresses: string[];
   link_status: string;
   matched_on: string[];
@@ -87,9 +87,10 @@ export default async function SearchPage({ searchParams }: { searchParams: Promi
             </select>
             <label htmlFor="direction">Direction</label>
             <select id="direction" name="direction" defaultValue={params.direction ?? ""}>
-              <option value="">Both</option>
+              <option value="">Any</option>
               <option value="inbound">From customer</option>
               <option value="outbound">To customer</option>
+              <option value="internal">Internal (Cirkla only)</option>
             </select>
           </div>
           <div className="form-row">
@@ -152,7 +153,7 @@ export default async function SearchPage({ searchParams }: { searchParams: Promi
                       <tr key={r.link_id}>
                         <td>{fmt.format(new Date(r.message_at))}</td>
                         <td>{r.customer_name}</td>
-                        <td>{r.direction === "inbound" ? "from customer" : "to customer"}</td>
+                        <td>{r.direction === "inbound" ? "from customer" : r.direction === "internal" ? "internal (Cirkla only)" : "to customer"}</td>
                         <td className="small">{r.customer_addresses.join(", ") || "not stored"}</td>
                         <td className="small">{r.matched_on.length ? r.matched_on.join(", ") : "filters"}</td>
                         <td>

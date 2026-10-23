@@ -108,3 +108,78 @@ describe("classifyMessage", () => {
     expect(out.bucket).toBe("newer_than_cutoff");
   });
 });
+
+describe("internal-only email (0013 internal_linking)", () => {
+  const PREF = "00000000-0000-4000-8000-00000000f001";
+  const idx = buildIndex({
+    customers: [
+      ...customers,
+      { id: PREF, canonicalName: "Preferred Packaging", status: "active", names: [{ value: "Pref", kind: "alias" }], domains: [{ value: "cpflexpack.com", shared: false }], emails: [] },
+    ],
+    distinctions: [],
+    rejections: [],
+    workspaceDomain: "gocirkla.com",
+  });
+  const internal = (subject: string, extra: Partial<Record<string, string>> = {}) =>
+    msg({ From: "Vaishnavi <vaishnavi@gocirkla.com>", To: OWNER, Cc: "jen@gocirkla.com", Subject: subject, ...extra });
+
+  it("off (the default): never linked, no follow-up, as before", () => {
+    const out = classifyMessage(internal("RE: 1C & 2C FIBER TRAYS- CIRKLA"), idx, ctx);
+    expect(out).toMatchObject({ bucket: "excluded_internal", rule: "internal_only", links: [] });
+    expect(out.followup).toBeUndefined();
+    expect(classifyMessage(internal("[Ticket] - Pref 1CP & 2CP"), idx, { ...ctx, internalLinking: "off" }).links).toEqual([]);
+  });
+
+  it("thread: handed back as a thread follow-up (message, thread, date only), not linked by itself", () => {
+    const m = internal("RE: 1C & 2C FIBER TRAYS- CIRKLA");
+    const out = classifyMessage(m, idx, { ...ctx, internalLinking: "thread" });
+    expect(out.bucket).toBe("excluded_internal");
+    expect(out.links).toEqual([]);
+    expect(out.followup).toEqual({ gmail_message_id: m.id, gmail_thread_id: m.threadId, message_at: new Date(m.internalDate).toISOString() });
+    expect(JSON.stringify(out)).not.toMatch(/FIBER|vaishnavi|jen@/);
+    // A named subject is NOT enough in thread mode.
+    expect(classifyMessage(internal("[Ticket] - Pref 1CP & 2CP"), idx, { ...ctx, internalLinking: "thread" }).links).toEqual([]);
+  });
+
+  it("thread_and_named: a subject naming exactly one customer links it as internal (I1), e.g. a CRM ticket", () => {
+    const out = classifyMessage(internal("[Ticket] - Pref 1CP & 2CP - Design and Pricing"), idx, { ...ctx, internalLinking: "thread_and_named" });
+    expect(out.bucket).toBe("matched");
+    expect(out.links).toHaveLength(1);
+    expect(out.links[0]).toMatchObject({ customer_id: PREF, direction: "internal", customer_addresses: [], score: 0.9 });
+    expect(out.links[0].evidence).toEqual([{ type: "I1", value: "pref" }]);
+    expect(out.followup).toBeDefined(); // also offered to its thread
+  });
+
+  it("thread_and_named never links on generic names, typos or two customers", () => {
+    const c = { ...ctx, internalLinking: "thread_and_named" as const };
+    expect(classifyMessage(internal("Acme Packging plan"), idx, c).links).toEqual([]); // typo
+    expect(classifyMessage(internal("Acme Packaging and Bravo Foods pricing"), idx, c).links).toEqual([]); // two customers
+    expect(classifyMessage(internal("Team lunch"), idx, c).links).toEqual([]);
+  });
+
+  it("privacy rules still win over internal linking", () => {
+    const c = { ...ctx, internalLinking: "thread_and_named" as const };
+    for (const m of [
+      internal("Confidential: Preferred Packaging salary bands"),
+      internal("Preferred Packaging", { Sensitivity: "Company-Confidential" }),
+      msg({ From: "vaishnavi@gocirkla.com", To: OWNER, Subject: "Preferred Packaging" }, ["INBOX", "Label_9"]),
+    ]) {
+      const out = classifyMessage(m, idx, c);
+      expect(out.links).toEqual([]);
+      expect(out.followup).toBeUndefined();
+    }
+  });
+
+  it("mail with a customer address is matched as before, whatever the setting", () => {
+    const out = classifyMessage(msg({ From: "Debraj <dbanerjee@cpflexpack.com>", To: OWNER, Subject: "1C & 2C FIBER TRAYS" }), idx, { ...ctx, internalLinking: "thread_and_named" });
+    expect(out.links[0]).toMatchObject({ customer_id: PREF, direction: "inbound" });
+    expect(out.followup).toBeUndefined();
+  });
+
+  it("unknown setting values mean off", async () => {
+    const { parseInternalLinking } = await import("@/lib/scan/classify");
+    expect(parseInternalLinking("thread")).toBe("thread");
+    expect(parseInternalLinking("on")).toBe("off");
+    expect(parseInternalLinking(undefined)).toBe("off");
+  });
+});

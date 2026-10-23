@@ -92,6 +92,7 @@ const gmail: WorkerGmail = {
   listLabels: (at) => withRetry(() => listLabels(at, fakeFetch), { sleep: async () => {} }),
   listIds: (at, t) => withRetry(() => listMessageIds(at, t, fakeFetch), { sleep: async () => {} }),
   getHeaders: (at, id) => withRetry(() => getMessageHeaders(at, id, fakeFetch), { sleep: async () => {} }),
+  getThread: async () => [],
 };
 
 let admin: Client;

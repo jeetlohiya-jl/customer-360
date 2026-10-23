@@ -9,7 +9,7 @@ import { costMicroUsd, ModelError, type Usage } from "@/lib/extract/model";
 import { MODEL_ID } from "@/lib/extract/prompt";
 import { redact } from "@/lib/extract/redact";
 import { errorCode } from "@/lib/scan/errors";
-import { buildAnswerPrompt, HELP_TEXT, isHelp, LATEST_FACTS, noTopicFacts, pickCustomers, renderAnswer, selectFacts, topicTypes, wantsLatest, type CustomerMatch, type SlackFact } from "./answer";
+import { buildAnswerPrompt, focusPeople, HELP_TEXT, isHelp, LATEST_FACTS, noTopicFacts, pickCustomers, renderAnswer, selectFacts, topicTypes, wantsLatest, wantsOpenItems, type CustomerMatch, type SlackFact } from "./answer";
 import { SlackError, type SlackApi } from "./api";
 import { answerReservationMicroUsd, type AnswerModel } from "./model";
 
@@ -94,9 +94,11 @@ export async function handleDm(deps: SlackDeps, ev: DmEvent): Promise<DmOutcome>
       return (outcome = "no_facts");
     }
     // Topic words come from the question minus the customer's name ("Quality Meats" is not a quality question).
-    const types = topicTypes(customers.reduce((q, c) => q.replace(new RegExp(c.matched.split(" ").map((w) => w.replace(/[^a-z0-9]/g, "")).filter(Boolean).join("[^a-z0-9]+"), "gi"), " "), question));
-    const latest = wantsLatest(question);
-    const selected = selectFacts(all, types);
+    const topicText = customers.reduce((q, c) => q.replace(new RegExp(c.matched.split(" ").map((w) => w.replace(/[^a-z0-9]/g, "")).filter(Boolean).join("[^a-z0-9]+"), "gi"), " "), question);
+    const types = topicTypes(topicText);
+    const openItems = wantsOpenItems(topicText);
+    const latest = !openItems && wantsLatest(question);
+    const selected = selectFacts(all, types, { openFirst: openItems });
     const facts = latest ? selected.slice(0, LATEST_FACTS) : selected;
     counts.facts = facts.length;
     if (facts.length === 0) {
@@ -105,7 +107,11 @@ export async function handleDm(deps: SlackDeps, ev: DmEvent): Promise<DmOutcome>
       return (outcome = "no_topic_facts");
     }
 
-    const prompt = buildAnswerPrompt(question, customers, facts, deps.today ?? new Date().toISOString().slice(0, 10), { latest });
+    const prompt = buildAnswerPrompt(question, customers, facts, deps.today ?? new Date().toISOString().slice(0, 10), {
+      latest,
+      openItems,
+      focus: focusPeople(question, facts),
+    });
     reservation = await deps.db.reserve(answerReservationMicroUsd(prompt.length));
     if (!reservation) {
       await reply(MESSAGES.budget);

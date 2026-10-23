@@ -1,7 +1,7 @@
 import "server-only";
 import { getServerEnv } from "@/lib/env";
 import {
-  getHistoryId, getMessageHeaders, gmailTokenContext, listHistory, listLabels, listMessageIds, refreshAccessToken, watchMailbox, withRetry,
+  getHistoryId, getMessageHeaders, getThreadHeaders, gmailTokenContext, listHistory, listLabels, listMessageIds, refreshAccessToken, watchMailbox, withRetry,
 } from "@/lib/gmail/google";
 import { decryptSecret } from "@/lib/security/crypto";
 import type { SyncConfig } from "./config";
@@ -20,6 +20,7 @@ export function syncIo(cfg: Extract<SyncConfig, { enabled: true }>): { gmail: Sy
       listIds: (at, pageToken) => withRetry(() => listMessageIds(at, pageToken)),
       listHistory: (at, start, pageToken) => withRetry(() => listHistory(at, start, pageToken)),
       getHeaders: (at, id) => withRetry(() => getMessageHeaders(at, id)),
+      getThread: (at, threadId) => withRetry(() => getThreadHeaders(at, threadId)),
       getHistoryId: (at) => withRetry(() => getHistoryId(at)),
       watch: (at) => withRetry(() => watchMailbox(at, cfg.topic)),
     },

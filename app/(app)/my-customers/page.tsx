@@ -8,7 +8,7 @@ type Link = {
   gmail_message_id: string;
   gmail_thread_id: string | null;
   message_at: string;
-  direction: "inbound" | "outbound";
+  direction: "inbound" | "outbound" | "internal";
   customer_addresses: string[];
   evidence: { type: string; value: string }[];
   link_status: string;
@@ -18,6 +18,8 @@ const EVIDENCE: Record<string, string> = {
   E1: "approved address",
   E2: "verified domain",
   E3: "customer name",
+  I1: "customer named in an internal email",
+  T1: "internal reply in a customer thread",
   review: "reviewer decision",
 };
 
@@ -71,7 +73,7 @@ export default async function MyCustomersPage() {
                   {g.links.slice(0, 50).map((l) => (
                     <tr key={l.gmail_message_id}>
                       <td>{fmt.format(new Date(l.message_at))}</td>
-                      <td>{l.direction === "inbound" ? "from customer" : "to customer"}</td>
+                      <td>{l.direction === "inbound" ? "from customer" : l.direction === "internal" ? "internal (Cirkla only)" : "to customer"}</td>
                       <td className="small">{l.customer_addresses.join(", ") || "not stored"}</td>
                       <td className="small">{l.evidence.map((e) => `${EVIDENCE[e.type] ?? e.type}: ${e.value}`).join("; ")}</td>
                       <td>

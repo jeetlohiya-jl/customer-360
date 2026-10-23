@@ -118,6 +118,7 @@ function harness(item: Partial<SyncItem>, opts: { pages?: MessageHeaders[][]; hi
       return { messages: (opts.history ?? []).map((m) => ({ id: m.id })), historyId: "7000", nextPageToken: null };
     },
     getHeaders: async (_at, id) => all.get(id)!,
+    getThread: async (_at, threadId) => [...all.values()].filter((m) => m.threadId === threadId),
     getHistoryId: async () => "5000",
     watch: async () => (calls.watch++, { historyId: "5000", expiration: new Date(T0 + 7 * DAY).toISOString() }),
   };
@@ -153,6 +154,43 @@ describe("sync worker", () => {
     await runSyncTick(h.deps);
     expect(h.commits[0].state).toMatchObject({ history_id: null, catchup_history_id: null, done: false, floor_at: new Date(T0 - 8 * DAY).toISOString() });
     expect(h.logs.join("\n")).toContain('"reason":"history_expired"');
+  });
+
+  it("an email deleted after its history entry (404 on fetch) is skipped, not a mailbox failure", async () => {
+    const h = harness({ history_id: "6000" }, { history: [msg("n1", T0), msg("gone1", T0), msg("n3", T0 - 1)] });
+    const getHeaders = h.deps.gmail.getHeaders;
+    h.deps.gmail.getHeaders = async (at, id) => {
+      if (id === "gone1") throw new GmailError("gmail_api_error", 404, "notFound");
+      return getHeaders(at, id);
+    };
+    const sum = await runSyncTick(h.deps);
+    expect(sum).toMatchObject({ synced: 1, failed: 0, gone: 1, links: 2 });
+    expect(h.fails).toEqual([]);
+    expect(h.commits[0]).toEqual({ state: { history_id: "7000", catchup_history_id: null, catchup_page_token: null, done: true }, links: 2, processed: 2 });
+  });
+
+  it("live: an internal reply is a thread follow-up; a newly linked thread's earlier internal replies are read once", async () => {
+    const newCustomer = { ...msg("c9", T0), threadId: "TH" };
+    const earlierReply = { ...msg("r8", T0 - DAY, "VB <vb@gocirkla.com>"), threadId: "TH" };
+    const liveReply = { ...msg("r9", T0, "VB <vb@gocirkla.com>"), threadId: "OLD" };
+    const h = harness({ history_id: "6000" }, { history: [newCustomer, liveReply], pages: [[earlierReply]] });
+    const sent: string[] = [];
+    h.deps.db.customerMaster = async () => ({ ...master, internal_linking: "thread" });
+    h.deps.db.commit = async (_o, _s, _l, _r, _p, f = []) => void sent.push(...f.map((x) => x.gmail_message_id));
+    const sum = await runSyncTick(h.deps);
+    expect(sent.sort()).toEqual(["r8", "r9"]);
+    expect(sum.followups).toBe(2);
+  });
+
+  it("other fetch errors still fail the step (position kept, retried later)", async () => {
+    const h = harness({ history_id: "6000" }, { history: [msg("n1", T0)] });
+    h.deps.gmail.getHeaders = async () => {
+      throw new GmailError("gmail_api_error", 500, "backendError");
+    };
+    const sum = await runSyncTick(h.deps);
+    expect(sum).toMatchObject({ synced: 0, failed: 1 });
+    expect(h.fails).toEqual(["gmail_get:gmail:gmail_api_error_500"]);
+    expect(h.commits).toEqual([]);
   });
 
   it("renews the Gmail watch when it expires within 2 days, and only then", async () => {

@@ -98,7 +98,7 @@ describe("Stage A -> B -> C on a synthetic mailbox", () => {
   it("Stage A: the header scan links only customer emails (unchanged behaviour)", async () => {
     const { db, close } = createWorkerDb(WORKER_URL);
     try {
-      for (let i = 0; i < 5; i++) if ((await runTick({ db, decrypt, gmail: { accessToken: gmailAuth, listLabels: (at) => listLabels(at, fakeFetch), listIds: (at, t) => listMessageIds(at, t, fakeFetch), getHeaders: (at, id) => getMessageHeaders(at, id, fakeFetch) } })).status === "idle") break;
+      for (let i = 0; i < 5; i++) if ((await runTick({ db, decrypt, gmail: { accessToken: gmailAuth, listLabels: (at) => listLabels(at, fakeFetch), listIds: (at, t) => listMessageIds(at, t, fakeFetch), getHeaders: (at, id) => getMessageHeaders(at, id, fakeFetch), getThread: async () => [] } })).status === "idle") break;
     } finally {
       await close();
     }

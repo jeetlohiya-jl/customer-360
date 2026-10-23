@@ -123,7 +123,18 @@ const TOPICS: [RegExp, string[]][] = [
   [/\b(?:follow[ -]?ups?|pending|to ?do|owe|action items?|next steps?|open items?)\b/i, ["follow_up"]],
 ];
 
+/**
+ * "What are the next steps / actionables / what's open": every kind of open item
+ * matters (a price to send, a pickup, samples), so no type filter; open items first.
+ */
+const OPEN_ITEMS = /\b(?:next steps?|action(?:ables?| items?| points?)|to ?dos?|pending|outstanding|open items?|what'?s open|what is open|open with)\b/i;
+
+export function wantsOpenItems(q: string): boolean {
+  return OPEN_ITEMS.test(q);
+}
+
 export function topicTypes(q: string): string[] {
+  if (wantsOpenItems(q)) return [];
   const t = TOPICS.filter(([re]) => re.test(q)).flatMap(([, types]) => types);
   if (/\$\s?\d/.test(q)) t.push("pricing");
   return [...new Set(t)];
@@ -136,11 +147,13 @@ const norm = (s: string | null) => (s ?? "").toLowerCase().replace(/[^a-z0-9]+/g
  * summary; the newest is kept), filtered to the question's topic when it has
  * one, newest first, capped by count and size. Facts arrive newest first.
  */
-export function selectFacts(all: SlackFact[], types: string[]): SlackFact[] {
+export function selectFacts(all: SlackFact[], types: string[], opts: { openFirst?: boolean } = {}): SlackFact[] {
   const seen = new Set<string>();
   const out: SlackFact[] = [];
   let size = 0;
-  for (const f of all) {
+  // Stable: open items (newest first), then everything else (newest first).
+  const ordered = opts.openFirst ? [...all.filter((f) => f.status === "open"), ...all.filter((f) => f.status !== "open")] : all;
+  for (const f of ordered) {
     if (types.length > 0 && !types.includes(f.fact_type)) continue;
     const keys = [`${f.customer_id}|s|${norm(f.summary)}`, ...(f.evidence_quote ? [`${f.customer_id}|q|${norm(f.evidence_quote)}`] : [])];
     if (keys.some((k) => seen.has(k))) continue;
@@ -170,7 +183,13 @@ export function factLine(f: SlackFact, i: number): string {
   parts.push(f.summary);
   // The Cirkla colleague on the email: its sender when Cirkla wrote it, its recipient when the customer did.
   const colleague = personName(f.source_owner_email);
-  if (colleague) parts.push(f.direction === "outbound" ? `from: ${colleague} (Cirkla)` : `to: ${colleague} (Cirkla)`);
+  if (colleague) {
+    parts.push(
+      f.direction === "outbound" ? `from: ${colleague} (Cirkla)`
+      : f.direction === "internal" ? `internal Cirkla email in ${colleague}'s mailbox`
+      : `to: ${colleague} (Cirkla)`,
+    );
+  }
   return parts.join(" | ");
 }
 
@@ -191,9 +210,28 @@ export function wantsLatest(q: string): boolean {
 
 export const LATEST_FACTS = 8;
 
-export function buildAnswerPrompt(question: string, customers: CustomerMatch[], facts: SlackFact[], today: string, opts: { latest?: boolean } = {}): string {
+/**
+ * Cirkla colleagues the question names ("what does David need…"), as they appear
+ * in the facts: the mailbox owner's name, or "Name (Cirkla)" in a summary.
+ */
+export function focusPeople(question: string, facts: SlackFact[]): string[] {
+  const names = new Set<string>();
+  for (const f of facts) {
+    const owner = personName(f.source_owner_email);
+    if (owner) names.add(owner.split(" ")[0]);
+    for (const m of f.summary.matchAll(/\b([A-Z][a-z]{2,})(?: [A-Z][a-z]+)? \(Cirkla\)/g)) names.add(m[1]);
+  }
+  const words = new Set(question.toLowerCase().split(/[^a-z']+/).filter(Boolean));
+  return [...names].filter((n) => words.has(n.toLowerCase())).sort().slice(0, 3);
+}
+
+export function buildAnswerPrompt(question: string, customers: CustomerMatch[], facts: SlackFact[], today: string, opts: { latest?: boolean; openItems?: boolean; focus?: string[] } = {}): string {
+  const focus = opts.focus?.length
+    ? ` Focus: the question is about ${opts.focus.join(" and ")} (Cirkla): put what they owe, were asked for or are waiting on first.`
+    : "";
+  const open = opts.openItems ? " The question asks for next steps: list the OPEN items, who owes each and any date; skip resolved history." : "";
   return [
-    `Today: ${today}. Customer: ${customers.map((c) => c.customer_name).join(", ")}.${opts.latest ? " Answer style: LATEST." : ""}`,
+    `Today: ${today}. Customer: ${customers.map((c) => c.customer_name).join(", ")}.${opts.latest ? " Answer style: LATEST." : ""}${open}${focus}`,
     `Facts:\n${facts.map((f, i) => factLine(f, i)).join("\n")}`,
     `Question: <<<${question.slice(0, 500)}>>>`,
   ].join("\n\n");

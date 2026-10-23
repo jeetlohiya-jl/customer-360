@@ -13,7 +13,8 @@
  */
 import { GmailError, type MessageHeaders } from "@/lib/gmail/google";
 import { buildIndex, type CustomerRecord } from "@/lib/customers/matcher";
-import { classifyMessage, EXCLUDE_LABEL_RE, parseAddresses, type LinkOut, type ReviewOut } from "./classify";
+import { classifyMessage, EXCLUDE_LABEL_RE, parseAddresses, parseInternalLinking, type LinkOut, type ReviewOut, type ThreadFollowup } from "./classify";
+import { expandThreads } from "./threads";
 import { errorCode, errorStage, inStage, StageError } from "./errors";
 
 export interface ClaimedJob {
@@ -28,6 +29,8 @@ export interface ClaimedJob {
 
 export interface MasterSnapshot {
   workspace_domain: string;
+  /** Setting 'internal_linking' (0013); missing means "off". */
+  internal_linking?: string;
   customers: { id: string; canonical_name: string; status: "active" | "inactive"; names: CustomerRecord["names"]; domains: CustomerRecord["domains"]; emails: string[] }[];
   distinctions: [string, string][];
   rejections: string[];
@@ -54,6 +57,8 @@ export interface WorkerDb {
   retentionCleanup(): Promise<number>;
   claimJob(leaseSeconds: number): Promise<ClaimedJob | null>;
   jobToken(jobId: string): Promise<{ refresh_token_enc: string; key_version: number } | null>;
+  /** Targeted scans (0013): the job's Gmail search, or null for the whole mailbox. */
+  jobQuery(jobId: string): Promise<string | null>;
   customerMaster(): Promise<MasterSnapshot>;
   commitPage(a: {
     jobId: string;
@@ -61,6 +66,8 @@ export interface WorkerDb {
     nextPageToken: string | null;
     counts: PageCounts;
     links: LinkOut[];
+    /** Internal-only messages the database links only to customers already in their thread. */
+    followups: ThreadFollowup[];
     reviews: ReviewPayload[];
     failures: { gmail_message_id: string; error_code: string }[];
     done: boolean;
@@ -72,8 +79,9 @@ export interface WorkerDb {
 export interface WorkerGmail {
   accessToken(refreshToken: string): Promise<string>;
   listLabels(accessToken: string): Promise<{ id: string; name: string }[]>;
-  listIds(accessToken: string, pageToken: string | null): Promise<{ messages: { id: string; threadId?: string }[]; nextPageToken: string | null }>;
+  listIds(accessToken: string, pageToken: string | null, query?: string | null): Promise<{ messages: { id: string; threadId?: string }[]; nextPageToken: string | null }>;
   getHeaders(accessToken: string, id: string): Promise<MessageHeaders>;
+  getThread(accessToken: string, threadId: string): Promise<MessageHeaders[]>;
 }
 
 export interface TickDeps {
@@ -154,11 +162,13 @@ export async function runTick(deps: TickDeps): Promise<TickResult> {
     });
     const labels = await inStage("gmail_labels", () => guard(deps.gmail.listLabels(accessToken)));
     const excludeLabelIds = new Set(labels.filter((l) => EXCLUDE_LABEL_RE.test(l.name)).map((l) => l.id));
-    const page = await inStage("gmail_list", () => guard(deps.gmail.listIds(accessToken, job.page_token)));
+    const query = await inStage("db_query", () => deps.db.jobQuery(job.job_id));
+    const page = await inStage("gmail_list", () => guard(deps.gmail.listIds(accessToken, job.page_token, query)));
 
     const counts = emptyCounts();
     counts.enumerated = page.messages.length;
     const links: LinkOut[] = [];
+    const followups: ThreadFollowup[] = [];
     const reviews = new Map<string, ReviewPayload>();
     const failures: { gmail_message_id: string; error_code: string }[] = [];
     const ctx = {
@@ -166,6 +176,7 @@ export async function runTick(deps: TickDeps): Promise<TickResult> {
       workspaceDomain: master.workspace_domain,
       cutoffMs: Date.parse(job.cutoff_at),
       excludeLabelIds,
+      internalLinking: parseInternalLinking(master.internal_linking),
     };
 
     await mapLimit(page.messages, deps.concurrency ?? 10, async (ref) => {
@@ -182,6 +193,7 @@ export async function runTick(deps: TickDeps): Promise<TickResult> {
       counts[out.bucket]++;
       if (out.weakEvidenceOnly) counts.weak_evidence_only++;
       links.push(...out.links);
+      if (out.followup) followups.push(out.followup);
       for (const r of out.reviews) {
         const cur = reviews.get(r.observed) ?? { ...r, messages: [] };
         cur.messages.push({
@@ -194,6 +206,16 @@ export async function runTick(deps: TickDeps): Promise<TickResult> {
       }
     });
 
+    // Colleagues' replies in these threads may be on pages already done (newest first): read the threads once.
+    followups.push(...(await expandThreads({
+      links,
+      seenIds: new Set(page.messages.map((m) => m.id)),
+      getThread: (threadId) => guard(deps.gmail.getThread(accessToken, threadId)),
+      index,
+      ctx,
+      log,
+    })));
+
     const pageNo = job.pages_done + 1;
     const status = await inStage("db_commit", () => deps.db.commitPage({
       jobId: job.job_id,
@@ -201,11 +223,12 @@ export async function runTick(deps: TickDeps): Promise<TickResult> {
       nextPageToken: page.nextPageToken,
       counts,
       links,
+      followups,
       reviews: [...reviews.values()],
       failures,
       done: page.nextPageToken === null,
     }));
-    log({ event: "scan_page_committed", status, pageNo, ...counts, links: links.length });
+    log({ event: "scan_page_committed", status, pageNo, ...counts, links: links.length, followups: followups.length });
     return { status, jobId: job.job_id, pageNo, counts };
   } catch (e) {
     const inner = e instanceof StageError ? e.cause : e;

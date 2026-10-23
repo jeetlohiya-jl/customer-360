@@ -18,6 +18,7 @@ export type ScanStage =
   | "db_cleanup"
   | "db_claim"
   | "db_token"
+  | "db_query"
   | "decrypt"
   | "gmail_auth"
   | "db_master"
@@ -37,6 +38,8 @@ export type ScanStage =
   | "gmail_watch"
   | "gmail_profile"
   | "gmail_history"
+  // Thread follow-ups (lib/scan/threads.ts)
+  | "gmail_thread"
   | "unknown";
 
 /** Wraps an error with the step it happened in. The cause is kept for code only. */

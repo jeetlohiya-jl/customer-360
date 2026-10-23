@@ -153,6 +153,18 @@ export async function setStatus(formData: FormData) {
   await callAndReturn(`/customers/${p.data.customerId}`, "customer_set_status", { p_customer: p.data.customerId, p_status: p.data.status }, "status");
 }
 
+/**
+ * 0013: find this customer's past email again in every approved mailbox (after a
+ * domain, address or name was added). Queues targeted scans; the scan worker
+ * does the rest. Nothing here reads Gmail.
+ */
+export async function backfillCustomer(formData: FormData) {
+  await requireAdmin();
+  const p = z.object({ customerId: uuid }).safeParse({ customerId: formData.get("customerId") });
+  if (!p.success) redirect("/customers?error=invalid");
+  await callAndReturn(`/customers/${p.data.customerId}`, "customer_backfill", { p_customer: p.data.customerId }, "backfill");
+}
+
 export async function unmarkDistinct(formData: FormData) {
   await requireAdmin();
   const p = z.object({ customerId: uuid, otherId: uuid }).safeParse({ customerId: formData.get("customerId"), otherId: formData.get("otherId") });

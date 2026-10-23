@@ -242,14 +242,22 @@ export interface MessageHeaders {
   headers: Record<string, string>;
 }
 
-/** One page of message IDs, newest first. Spam and trash are not included. */
+/** Gmail search accepted for targeted scans (0013): addresses, domains and quoted names only. */
+export const SEARCH_QUERY = /^[A-Za-z0-9@._:"(){} &'+-]{1,500}$/;
+
+/** One page of message IDs, newest first. Spam and trash are not included. `query`: a Gmail search (targeted scans). */
 export async function listMessageIds(
   accessToken: string,
   pageToken: string | null,
   fetchImpl: Fetch = fetch,
+  query?: string | null,
 ): Promise<{ messages: MessageRef[]; nextPageToken: string | null }> {
   const qs = new URLSearchParams({ maxResults: String(SCAN_PAGE_SIZE), includeSpamTrash: "false" });
   if (pageToken) qs.set("pageToken", pageToken);
+  if (query) {
+    if (!SEARCH_QUERY.test(query)) throw new GmailError("gmail_api_error", 400, "bad_search_query");
+    qs.set("q", query);
+  }
   const r = await gmailGet<{ messages?: MessageRef[]; nextPageToken?: string }>(`/messages?${qs}`, accessToken, fetchImpl);
   return { messages: r.messages ?? [], nextPageToken: r.nextPageToken ?? null };
 }
@@ -269,6 +277,35 @@ export async function getMessageHeaders(accessToken: string, id: string, fetchIm
     if ((SCAN_HEADERS as readonly string[]).some((s) => s.toLowerCase() === key) && !(key in headers)) headers[key] = h.value;
   }
   return { id: m.id, threadId: m.threadId, labelIds: m.labelIds ?? [], internalDate: Number(m.internalDate ?? 0), headers };
+}
+
+/** Largest thread whose messages are read for thread follow-ups; longer threads are skipped. */
+export const MAX_THREAD_MESSAGES = 100;
+
+/**
+ * Headers and labels of every message in one thread (format=metadata, the same
+ * named headers as getMessageHeaders). Used to link internal follow-ups once a
+ * thread is known to belong to a customer. gmail.metadata-compatible.
+ */
+export async function getThreadHeaders(accessToken: string, threadId: string, fetchImpl: Fetch = fetch): Promise<MessageHeaders[]> {
+  if (!/^[0-9a-zA-Z_-]{1,64}$/.test(threadId)) throw new GmailError("gmail_api_error", 400, "bad_thread_id");
+  const qs = new URLSearchParams({ format: "metadata" });
+  for (const h of SCAN_HEADERS) qs.append("metadataHeaders", h);
+  const t = await gmailGet<{ messages?: (GmailMessage & { threadId?: string; labelIds?: string[] })[] }>(
+    `/threads/${encodeURIComponent(threadId)}?${qs}`,
+    accessToken,
+    fetchImpl,
+  );
+  const messages = t.messages ?? [];
+  if (messages.length > MAX_THREAD_MESSAGES) return [];
+  return messages.map((m) => {
+    const headers: Record<string, string> = {};
+    for (const h of m.payload?.headers ?? []) {
+      const key = h.name.toLowerCase();
+      if ((SCAN_HEADERS as readonly string[]).some((s) => s.toLowerCase() === key) && !(key in headers)) headers[key] = h.value;
+    }
+    return { id: m.id, threadId: m.threadId ?? threadId, labelIds: m.labelIds ?? [], internalDate: Number(m.internalDate ?? 0), headers };
+  });
 }
 
 /** One MIME part of a message (format=full). Attachment data is never included by Gmail; only an attachmentId. */

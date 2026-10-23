@@ -5,6 +5,7 @@ import { tickErrorEvent } from "@/lib/scan/errors";
 import { safeEqual, decryptSecret } from "@/lib/security/crypto";
 import {
   getMessageHeaders,
+  getThreadHeaders,
   gmailTokenContext,
   listLabels,
   listMessageIds,
@@ -60,8 +61,9 @@ export async function GET(request: NextRequest) {
       gmail: {
         accessToken: (refreshToken) => refreshAccessToken({ refreshToken, clientId, clientSecret }),
         listLabels: (at) => withRetry(() => listLabels(at)),
-        listIds: (at, pageToken) => withRetry(() => listMessageIds(at, pageToken)),
+        listIds: (at, pageToken, query) => withRetry(() => listMessageIds(at, pageToken, fetch, query)),
         getHeaders: (at, id) => withRetry(() => getMessageHeaders(at, id)),
+        getThread: (at, threadId) => withRetry(() => getThreadHeaders(at, threadId)),
       },
       log: (e) => console.info(JSON.stringify(e)),
     });

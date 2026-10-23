@@ -240,7 +240,7 @@ export default async function FactsPage({ searchParams }: { searchParams: Promis
                       <td className="small">
                         {x.evidence_quote ? `"${x.evidence_quote}"` : ""}
                         <br />
-                        {x.direction === "inbound" ? "from customer" : "to customer"}
+                        {x.direction === "inbound" ? "from customer" : x.direction === "internal" ? "internal (Cirkla only)" : "to customer"}
                         {x.source_owner_email ? ` · ${x.source_owner_email}` : x.is_mine ? " · your mailbox" : ""}
                         {href ? <> · <a href={href} target="_blank" rel="noreferrer noopener">open in Gmail</a></> : null}
                       </td>

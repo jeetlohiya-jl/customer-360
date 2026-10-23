@@ -1,8 +1,8 @@
 # Customer 360
 
-Cirkla's internal customer-intelligence app: Gmail-sourced business knowledge with a Slack assistant. This repository is at **Phase 2**: Workspace sign-in plus a **Gmail connection proof of concept**. An employee can connect their own mailbox (read-only `gmail.metadata`), see up to five recent message headers fetched live from the Gmail API, and disconnect. The UI follows the Cirkla visual identity.
+Cirkla's internal customer-intelligence app: Gmail-sourced business knowledge with a Slack assistant. Employees connect their mailbox; customer emails are matched to the customer list from headers, AI extracts business facts from the linked emails, and a Slack DM assistant answers questions from those facts. New email arrives through Gmail push.
 
-**Not included yet:** email import or storage, background sync, push notifications, AI extraction, Slack. Slack is hard-disabled (`FEATURE_SLACK` must be `off`).
+Each part is behind its own feature flag and fails safe (a wrong setting turns that part off, never the site): `FEATURE_GMAIL`, `FEATURE_SCAN`, `FEATURE_EXTRACT`, `FEATURE_SLACK`, `FEATURE_SYNC`. Phase reports are in [`docs/phases/`](docs/phases/); the latest is [Phase 6: internal emails, targeted re-scans, sync fixes](docs/phases/phase-6-internal-threads.md).
 
 Architecture and policies: see the Customer 360 architecture plan (revision 3) shared with the team. The Phase 1 report is in [`docs/phases/phase-1.md`](docs/phases/phase-1.md).
 
@@ -110,10 +110,15 @@ Every variable is listed in [`.env.example`](.env.example) with placeholders onl
 - Admins also see counts per customer across all mailboxes (no individual emails, no per-mailbox split).
 - Migration `20261015000007_search.sql` adds functions and one index only. Details, dry run and rollback: [`docs/phases/phase-3.2.md`](docs/phases/phase-3.2.md).
 
-## Customer facts (Stage B + C): built, OFF
+## Customer facts (Stage B + C)
 
-- AI fact extraction from customer-linked emails. Disabled: `FEATURE_EXTRACT=off`, no cron entry, Gmail permission unchanged (`gmail.metadata`), migration 0008 kept in `supabase/pending/` so `db push` cannot apply it.
-- Tested on synthetic emails only. Details, guarantees and enabling steps: [`docs/phases/stage-bc.md`](docs/phases/stage-bc.md).
+- AI fact extraction from customer-linked emails (`FEATURE_EXTRACT`, extraction allowlist, `gmail.readonly`). Details, guarantees and enabling steps: [`docs/phases/stage-bc.md`](docs/phases/stage-bc.md).
+
+## Slack assistant, sync, internal emails
+
+- Slack DM assistant: [`docs/phases/phase-4-slack.md`](docs/phases/phase-4-slack.md).
+- New email sync (Gmail push + safety net): [`docs/phases/phase-5-sync.md`](docs/phases/phase-5-sync.md).
+- Colleagues' internal emails in customer threads, CRM tickets, "Find past emails" (targeted re-scan), deleted-email handling and audit of direct changes: [`docs/phases/phase-6-internal-threads.md`](docs/phases/phase-6-internal-threads.md).
 
 ## Hosted setup (at the Phase 1 review checkpoint, not before)
 

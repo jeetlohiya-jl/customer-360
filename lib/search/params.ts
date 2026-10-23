@@ -19,7 +19,7 @@ const schema = z
     customer: z.preprocess(blankToUndef, z.string().regex(UUID, "Unknown customer").optional()),
     from: z.preprocess(blankToUndef, z.string().refine(validDay, "From date must be a real date (YYYY-MM-DD)").optional()),
     to: z.preprocess(blankToUndef, z.string().refine(validDay, "To date must be a real date (YYYY-MM-DD)").optional()),
-    direction: z.preprocess(blankToUndef, z.enum(["inbound", "outbound"], { error: "Unknown direction" }).optional()),
+    direction: z.preprocess(blankToUndef, z.enum(["inbound", "outbound", "internal"], { error: "Unknown direction" }).optional()),
     mailbox: z.preprocess(blankToUndef, z.string().trim().max(254).optional()),
     after: z.preprocess(blankToUndef, z.string().max(200).optional()),
   })
@@ -30,7 +30,7 @@ export type SearchParams = {
   customer?: string;
   from?: string;
   to?: string;
-  direction?: "inbound" | "outbound";
+  direction?: "inbound" | "outbound" | "internal";
   mailbox?: string;
   cursor?: Cursor;
 };

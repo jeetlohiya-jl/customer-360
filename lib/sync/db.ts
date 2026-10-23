@@ -1,6 +1,7 @@
 import "server-only";
 import { Pool } from "pg";
 import { RULES_VERSION } from "@/lib/customers/matcher";
+import { followupItems } from "@/lib/scan/threads";
 import type { MasterSnapshot } from "@/lib/scan/worker";
 import type { SyncDb, SyncItem } from "./run";
 
@@ -41,11 +42,12 @@ export function createSyncDb(url: string, ca?: string): { db: SyncDb & { push(ma
       const r = await pool.query<{ m: MasterSnapshot }>("select private.worker_customer_master() as m");
       return r.rows[0].m;
     },
-    async commit(ownerId, state, links, reviews, processed) {
+    async commit(ownerId, state, links, reviews, processed, followups = []) {
       await pool.query("select private.worker_sync_commit($1, $2::jsonb, $3::jsonb, $4::jsonb, $5::jsonb, $6)", [
         ownerId,
         JSON.stringify(state),
-        JSON.stringify(links),
+        // Thread follow-ups ride in the links list, marked and without a customer (0013).
+        JSON.stringify([...links, ...followupItems(followups)]),
         JSON.stringify(reviews),
         JSON.stringify({ processed }),
         RULES_VERSION,

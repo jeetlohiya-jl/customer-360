@@ -52,6 +52,7 @@ function fakeGmail(total: number, opts: { failIds?: Set<string>; revokeAfter?: n
       if (opts.failIds?.has(id)) throw new GmailError("gmail_api_error", 500);
       return box.headers(id, box.ids.indexOf(id));
     },
+    getThread: async (_at, threadId) => box.ids.filter((id) => (box.headers(id, box.ids.indexOf(id)).threadId ?? "") === threadId).map((id) => box.headers(id, box.ids.indexOf(id))),
   };
   return gmail;
 }
@@ -74,6 +75,7 @@ function fakeDb() {
     retentionCleanup: async () => 0,
     claimJob: async (): Promise<ClaimedJob | null> => (["queued", "running", "cancelling"].includes(job.status) ? { ...job } : null),
     jobToken: async () => (job.status === "paused_auth" ? null : { refresh_token_enc: "enc", key_version: 1 }),
+    jobQuery: async () => null,
     customerMaster: async () => master,
     commitPage: async (a) => {
       if (a.pageNo <= job.pages_done) return "duplicate";
@@ -134,7 +136,7 @@ describe("scan worker", () => {
     const linksAfterPage1 = f.links.size;
     const again = await f.db.commitPage({
       jobId: "job-1", pageNo: 1, nextPageToken: "p1", counts: f.job.counts as unknown as PageCounts,
-      links: [...f.links.values()], reviews: [], failures: [], done: false,
+      links: [...f.links.values()], followups: [], reviews: [], failures: [], done: false,
     });
     expect(again).toBe("duplicate");
     expect(f.links.size).toBe(linksAfterPage1);
@@ -233,5 +235,73 @@ describe("scan worker", () => {
     };
     expect((await runTick(deps(f.db, g))).status).toBe("released");
     expect(codes[0]).toMatch(/^gmail_list:gmail:gmail_api_error_503$/);
+  });
+
+  it("thread follow-ups (0013): internal replies are sent for the database to resolve, and newly linked threads are read once", async () => {
+    // Thread T: the customer's email is on this page; colleagues' replies are not (pages run newest first).
+    const customerMsg = { id: "c1", threadId: "T", labelIds: ["INBOX"], internalDate: Date.parse("2026-10-01T00:00:00Z"), headers: { from: "Jane <jane@acmepackaging.com>", to: OWNER, subject: "trays" } };
+    const reply = { id: "r1", threadId: "T", labelIds: ["INBOX"], internalDate: Date.parse("2026-10-02T00:00:00Z"), headers: { from: "vb@gocirkla.com", to: OWNER, subject: "RE: trays" } };
+    const later = { id: "r2", threadId: "T", labelIds: ["INBOX"], internalDate: Date.parse("2026-10-20T00:00:00Z"), headers: { from: "vb@gocirkla.com", to: OWNER, subject: "RE: trays" } };
+    const inPage = { id: "i1", threadId: "U", labelIds: ["INBOX"], internalDate: Date.parse("2026-10-03T00:00:00Z"), headers: { from: "vb@gocirkla.com", to: OWNER, subject: "lunch" } };
+    const all = new Map([customerMsg, reply, later, inPage].map((m) => [m.id, m]));
+    const threadCalls: string[] = [];
+    const gmail: WorkerGmail = {
+      accessToken: async () => "a",
+      listLabels: async () => [],
+      listIds: async () => ({ messages: [{ id: "c1" }, { id: "i1" }], nextPageToken: null }),
+      getHeaders: async (_a, id) => all.get(id)!,
+      getThread: async (_a, t) => (threadCalls.push(t), [...all.values()].filter((m) => m.threadId === t)),
+    };
+    const run = async (mode: string) => {
+      const f = fakeDb();
+      let sent: { followups: unknown[] } | null = null;
+      f.db.customerMaster = async () => ({ ...master, internal_linking: mode });
+      const commit = f.db.commitPage;
+      f.db.commitPage = async (a) => ((sent = a), commit(a));
+      await runTick(deps(f.db, gmail));
+      return sent!.followups.map((x) => (x as { gmail_message_id: string }).gmail_message_id).sort();
+    };
+    expect(await run("thread")).toEqual(["i1", "r1"]); // r2 is newer than the scan cutoff: left to sync
+    expect(threadCalls).toEqual(["T"]); // only the linked thread is read
+    threadCalls.length = 0;
+    expect(await run("off")).toEqual([]);
+    expect(threadCalls).toEqual([]);
+  });
+
+  it("a thread that cannot be read never fails the page", async () => {
+    const f = fakeDb();
+    f.db.customerMaster = async () => ({ ...master, internal_linking: "thread" });
+    const g = fakeGmail(10);
+    g.getThread = async () => {
+      throw new GmailError("gmail_api_error", 500);
+    };
+    expect((await runTick(deps(f.db, g))).status).toBe("completed");
+  });
+
+  it("targeted scans (0013) pass the job's Gmail search to the listing", async () => {
+    const f = fakeDb();
+    f.db.jobQuery = async () => "{from:acmepackaging.com to:acmepackaging.com}";
+    const g = fakeGmail(10);
+    const queries: (string | null | undefined)[] = [];
+    const list = g.listIds;
+    g.listIds = async (at, t, q) => (queries.push(q), list(at, t, q));
+    await runTick(deps(f.db, g));
+    expect(queries).toEqual(["{from:acmepackaging.com to:acmepackaging.com}"]);
+  });
+
+  it("thread reads and searches use metadata only, with a validated search", async () => {
+    const { getThreadHeaders, listMessageIds } = await import("@/lib/gmail/google");
+    let url = "";
+    const fake = (async (u: string) => {
+      url = u;
+      return new Response(JSON.stringify({ messages: [{ id: "a", threadId: "T", internalDate: "5", payload: { headers: [{ name: "From", value: "x@y.com" }, { name: "X-Secret", value: "no" }] } }] }), { status: 200 });
+    }) as unknown as typeof fetch;
+    const t = await getThreadHeaders("at", "T", fake);
+    expect(url).toContain("/threads/T?format=metadata");
+    expect(t).toEqual([{ id: "a", threadId: "T", labelIds: [], internalDate: 5, headers: { from: "x@y.com" } }]);
+    await listMessageIds("at", null, fake, '{from:cpflexpack.com subject:"preferred packaging"}');
+    expect(new URL(url).searchParams.get("q")).toBe('{from:cpflexpack.com subject:"preferred packaging"}');
+    await expect(listMessageIds("at", null, fake, "in:anywhere\nlabel:x")).rejects.toThrow();
+    await expect(getThreadHeaders("at", "../x", fake)).rejects.toThrow();
   });
 });

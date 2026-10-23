@@ -14,7 +14,8 @@
  */
 import { GmailError, type MessageHeaders, type MessageRef } from "@/lib/gmail/google";
 import { buildIndex, RULES_VERSION } from "@/lib/customers/matcher";
-import { classifyMessage, EXCLUDE_LABEL_RE, parseAddresses, type LinkOut } from "@/lib/scan/classify";
+import { classifyMessage, EXCLUDE_LABEL_RE, parseAddresses, parseInternalLinking, type LinkOut, type ThreadFollowup } from "@/lib/scan/classify";
+import { expandThreads } from "@/lib/scan/threads";
 import { errorCode, errorStage, inStage, StageError } from "@/lib/scan/errors";
 import type { MasterSnapshot, ReviewPayload } from "@/lib/scan/worker";
 
@@ -46,7 +47,7 @@ export interface SyncDb {
   claim(limit: number, leaseSeconds: number, owner?: string): Promise<SyncItem[]>;
   token(ownerId: string): Promise<{ refresh_token_enc: string; key_version: number } | null>;
   customerMaster(): Promise<MasterSnapshot>;
-  commit(ownerId: string, state: SyncState, links: LinkOut[], reviews: ReviewPayload[], processed: number): Promise<void>;
+  commit(ownerId: string, state: SyncState, links: LinkOut[], reviews: ReviewPayload[], processed: number, followups?: ThreadFollowup[]): Promise<void>;
   fail(ownerId: string, code: string): Promise<void>;
 }
 
@@ -56,6 +57,7 @@ export interface SyncGmail {
   listIds(accessToken: string, pageToken: string | null): Promise<{ messages: MessageRef[]; nextPageToken: string | null }>;
   listHistory(accessToken: string, startHistoryId: string, pageToken: string | null): Promise<{ messages: MessageRef[]; historyId: string; nextPageToken: string | null }>;
   getHeaders(accessToken: string, id: string): Promise<MessageHeaders>;
+  getThread(accessToken: string, threadId: string): Promise<MessageHeaders[]>;
   getHistoryId(accessToken: string): Promise<string>;
   watch(accessToken: string): Promise<{ historyId: string; expiration: string }>;
 }
@@ -78,6 +80,16 @@ export interface SyncSummary {
   processed: number;
   links: number;
   watches_renewed: number;
+  /** Messages that no longer existed when fetched (deleted after the history entry); skipped. */
+  gone: number;
+  /** Internal-only messages sent to the database as thread follow-ups. */
+  followups: number;
+}
+
+/** Gmail no longer has this message (404 Not Found): it was deleted after the history entry was written. */
+export function isGone(e: unknown): boolean {
+  const inner = e instanceof StageError ? e.cause : e;
+  return inner instanceof GmailError && inner.code === "gmail_api_error" && inner.httpStatus === 404;
 }
 
 async function mapLimit<T>(items: T[], limit: number, fn: (item: T) => Promise<void>): Promise<void> {
@@ -90,7 +102,7 @@ async function mapLimit<T>(items: T[], limit: number, fn: (item: T) => Promise<v
 export async function runSyncTick(deps: SyncDeps): Promise<SyncSummary> {
   const log = deps.log ?? (() => {});
   const now = deps.now ?? Date.now;
-  const sum: SyncSummary = { mailboxes: 0, synced: 0, failed: 0, processed: 0, links: 0, watches_renewed: 0 };
+  const sum: SyncSummary = { mailboxes: 0, synced: 0, failed: 0, processed: 0, links: 0, watches_renewed: 0, gone: 0, followups: 0 };
   const items = await inStage("db_claim", () => deps.db.claim(deps.limit ?? 5, 240, deps.owner));
   sum.mailboxes = items.length;
   if (items.length === 0) return sum;
@@ -115,6 +127,7 @@ export async function runSyncTick(deps: SyncDeps): Promise<SyncSummary> {
         workspaceDomain: master.workspace_domain,
         cutoffMs: Number.MAX_SAFE_INTEGER,
         excludeLabelIds: new Set(labels.filter((l) => EXCLUDE_LABEL_RE.test(l.name)).map((l) => l.id)),
+        internalLinking: parseInternalLinking(master.internal_linking),
       };
 
       // 1. Keep the push registration alive.
@@ -125,19 +138,35 @@ export async function runSyncTick(deps: SyncDeps): Promise<SyncSummary> {
       }
 
       const links: LinkOut[] = [];
+      const followups: ThreadFollowup[] = [];
+      const seenIds = new Set<string>();
       const reviews = new Map<string, ReviewPayload>();
       let processed = 0;
+      let gone = 0;
       const handle = async (ids: MessageRef[], floorMs: number): Promise<boolean> => {
         let reachedFloor = false;
         await mapLimit(ids, deps.concurrency ?? 10, async (ref) => {
-          const msg = await inStage("gmail_get", () => deps.gmail.getHeaders(at, ref.id));
+          let msg: MessageHeaders;
+          try {
+            msg = await inStage("gmail_get", () => deps.gmail.getHeaders(at, ref.id));
+          } catch (e) {
+            // Deleted (or moved out of reach) between the history entry and this fetch:
+            // nothing to link. Skipping it keeps one vanished email from blocking the mailbox.
+            if (isGone(e)) {
+              gone++;
+              return;
+            }
+            throw e;
+          }
           if (msg.internalDate < floorMs) {
             reachedFloor = true;
             return;
           }
           processed++;
+          seenIds.add(msg.id);
           const out = classifyMessage(msg, index, ctx);
           links.push(...out.links);
+          if (out.followup) followups.push(out.followup);
           for (const r of out.reviews) {
             const cur = reviews.get(r.observed) ?? { ...r, messages: [] };
             cur.messages.push({
@@ -198,10 +227,15 @@ export async function runSyncTick(deps: SyncDeps): Promise<SyncSummary> {
       }
       if (watchExpires) state.watch_expires_at = watchExpires;
 
-      await inStage("db_commit", () => deps.db.commit(item.owner_id, state, links, [...reviews.values()], processed));
+      // Colleagues' earlier internal replies in a newly linked thread (see lib/scan/threads.ts).
+      followups.push(...(await expandThreads({ links, seenIds, getThread: (threadId) => deps.gmail.getThread(at, threadId), index, ctx, log })));
+
+      await inStage("db_commit", () => deps.db.commit(item.owner_id, state, links, [...reviews.values()], processed, followups));
       sum.synced++;
       sum.processed += processed;
       sum.links += links.length;
+      sum.gone += gone;
+      sum.followups += followups.length;
     } catch (e) {
       const inner = e instanceof StageError ? e.cause : e;
       const code = (inner instanceof GmailError && inner.code === "revoked" ? "gmail_auth:revoked" : `${errorStage(e)}:${errorCode(e)}`).slice(0, 64);

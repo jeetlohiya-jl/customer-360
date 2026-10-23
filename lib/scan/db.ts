@@ -1,5 +1,6 @@
 import "server-only";
 import { Pool } from "pg";
+import { followupItems } from "./threads";
 import type { WorkerDb, ClaimedJob, MasterSnapshot } from "./worker";
 
 /**
@@ -36,6 +37,10 @@ export function createWorkerDb(url: string, ca?: string): { db: WorkerDb; close:
       );
       return r.rows[0] ?? null;
     },
+    async jobQuery(jobId) {
+      const r = await pool.query<{ q: string | null }>("select private.worker_job_query($1) as q", [jobId]);
+      return r.rows[0]?.q ?? null;
+    },
     async customerMaster() {
       const r = await pool.query<{ m: MasterSnapshot }>("select private.worker_customer_master() as m");
       return r.rows[0].m;
@@ -48,7 +53,8 @@ export function createWorkerDb(url: string, ca?: string): { db: WorkerDb; close:
           a.pageNo,
           a.nextPageToken,
           JSON.stringify(a.counts),
-          JSON.stringify(a.links),
+          // Thread follow-ups ride in the links list, marked and without a customer (0013).
+          JSON.stringify([...a.links, ...followupItems(a.followups)]),
           JSON.stringify(a.reviews),
           JSON.stringify(a.failures),
           a.done,

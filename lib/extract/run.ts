@@ -11,7 +11,7 @@
  * Logs carry event names, counts and safe codes only. All I/O is injected.
  */
 import { GmailError, isRateLimited, type FullMessage, type MessageHeaders } from "@/lib/gmail/google";
-import { EXCLUDE_LABEL_RE, exclusionRule } from "@/lib/scan/classify";
+import { EXCLUDE_LABEL_RE, exclusionRule, type Direction } from "@/lib/scan/classify";
 import { errorCode, errorStage, inStage, StageError } from "@/lib/scan/errors";
 import { costMicroUsd, ModelError, reservationMicroUsd, type ExtractModel, type Usage } from "./model";
 import { buildUserMessage, MODEL_ID } from "./prompt";
@@ -25,7 +25,7 @@ export interface ClaimedItem {
   gmail_message_id: string;
   gmail_thread_id: string | null;
   message_at: string;
-  direction: "inbound" | "outbound";
+  direction: Direction;
   customers: { id: string; name: string }[];
 }
 
@@ -45,7 +45,7 @@ export interface ExtractDb {
   reserve(microUsd: number): Promise<string | null>;
   settle(reservationId: string, usage: Usage & { actual_microusd: number; model: string }): Promise<void>;
   commit(ownerId: string, messageId: string, facts: CommitFact[]): Promise<number>;
-  skip(ownerId: string, messageId: string, reason: SkipReason | "excluded"): Promise<void>;
+  skip(ownerId: string, messageId: string, reason: SkipReason | "excluded" | "deleted"): Promise<void>;
   fail(ownerId: string, messageId: string, code: string): Promise<string>;
   release(ownerId: string, messageId: string): Promise<void>;
 }
@@ -76,7 +76,7 @@ export interface TickSummary {
   facts_for_review: number;
   dropped: Partial<Record<DropReason, number>>;
   review_reasons: Partial<Record<ReviewReason, number>>;
-  skip_reasons: Partial<Record<SkipReason | "excluded", number>>;
+  skip_reasons: Partial<Record<SkipReason | "excluded" | "deleted", number>>;
   redactions: Partial<Record<RedactionKind, number>>;
   cost_microusd: number;
 }
@@ -114,12 +114,13 @@ export function prepareMessage(
   const headers = headerMap(msg);
   const asHeaders: MessageHeaders = { id: msg.id, threadId: msg.threadId, labelIds: msg.labelIds, internalDate: msg.internalDate, headers };
   // The scan's exclusions are re-checked now: a label or header may have changed since the link was made.
+  // Internal-only mail reaches here only through a thread or subject link (0013), so that rule is not repeated.
   const excluded = exclusionRule(asHeaders, {
     ownerEmail: item.mailbox_email,
     workspaceDomain: item.mailbox_email.split("@")[1] ?? "",
     cutoffMs: Number.MAX_SAFE_INTEGER,
     excludeLabelIds,
-  });
+  }, { allowInternal: item.direction === "internal" });
   if (excluded) return { kind: "skip", reason: "excluded" };
 
   const mime = mimeText(msg.payload);
@@ -247,6 +248,13 @@ export async function runExtractTick(deps: ExtractDeps): Promise<TickSummary> {
         sum.facts_for_review += v.facts.filter((f) => f.review_reasons.length > 0).length;
       } catch (e) {
         const inner = e instanceof StageError ? e.cause : e;
+        if (!reservation && inner instanceof GmailError && inner.code === "gmail_api_error" && inner.httpStatus === 404) {
+          // The email was deleted after it was linked: nothing to read, and retrying cannot help.
+          await deps.db.skip(ownerId, item.gmail_message_id, "deleted").catch(() => undefined);
+          sum.skipped++;
+          sum.skip_reasons.deleted = (sum.skip_reasons.deleted ?? 0) + 1;
+          continue;
+        }
         if (isRateLimited(inner) && !reservation) {
           ownerRateLimited = true;
           await deps.db.release(ownerId, item.gmail_message_id).catch(() => undefined);
