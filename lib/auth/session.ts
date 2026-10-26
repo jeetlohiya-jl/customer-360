@@ -9,7 +9,7 @@ export interface CurrentUser {
   id: string;
   email: string;
   role: AppRole;
-  status: "active" | "departed";
+  status: "active" | "suspended" | "departed";
 }
 
 /**

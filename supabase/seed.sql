@@ -1,6 +1,10 @@
 -- SYNTHETIC local development data. Loaded only by `supabase db reset` on a
 -- local stack. Never run against a hosted project. No real people or email.
 
+-- Local stacks and database tests: any synthetic Workspace account is active.
+-- (Hosted: invite-only since 0014; supabase/tests/014 covers invite mode.)
+update private.settings set value = 'workspace' where key = 'access_mode';
+
 insert into auth.users (id, email, raw_user_meta_data, raw_app_meta_data, email_confirmed_at)
 values
   ('11111111-1111-4111-8111-111111111111', 'synthetic.admin@gocirkla.com',

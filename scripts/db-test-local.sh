@@ -57,6 +57,8 @@ if [[ "${CHECK_ROLLBACK:-1}" == "1" ]]; then
   for f in "$ROOT"/supabase/migrations/*.sql $(ls "$ROOT"/supabase/pending/*.sql 2>/dev/null); do
     "${PSQL[@]}" -d c360_test -f "$f"
   done
+  # As the seed does: synthetic test users are active without invites (014 tests invite mode itself).
+  "${PSQL[@]}" -d c360_test -c "update private.settings set value = 'workspace' where key = 'access_mode';"
   pg_prove -h "$WORK" -p "$PORT" -U postgres -d c360_test "$ROOT"/supabase/tests/*.sql $(ls "$ROOT"/supabase/pending/tests/*.sql 2>/dev/null) >/dev/null
   echo "    rollback + re-apply OK, tests still pass"
 fi

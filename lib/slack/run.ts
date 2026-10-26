@@ -44,7 +44,7 @@ export type DmOutcome =
 
 export const MESSAGES = {
   notAllowed: (appUrl: string) =>
-    `Sorry, this assistant is only for active Cirkla employees. If you work at Cirkla, sign in once at ${appUrl} with your Cirkla Google account, then ask again.`,
+    `Sorry, this assistant is only for people invited to Customer 360. If a Customer 360 admin has invited you, sign in once at ${appUrl} with your Cirkla Google account, then ask again.`,
   rateLimited: "You've reached the hourly limit for questions. Please try again in a little while.",
   noCustomer: "Which customer do you mean? I couldn't find a customer name in your question. Use the name as it appears in Customer 360, e.g. _What's open with Acme Foods?_",
   noFacts: (names: string) => `I don't have any stored facts you can see for ${names} yet.`,

@@ -20,6 +20,8 @@ PSQL=(psql -h "$WORK" -p "$PORT" -U postgres -v ON_ERROR_STOP=1 -q)
 for f in "$ROOT"/supabase/migrations/*.sql; do "${PSQL[@]}" -d c360_e2e -f "$f"; done
 # Pending (unapproved) migrations: this temporary database only, never hosted.
 for f in "$ROOT"/supabase/pending/*.sql; do [ -e "$f" ] && "${PSQL[@]}" -d c360_e2e -f "$f"; done
+# Synthetic users are active without invites (invite-only access is tested in supabase/tests/014).
+"${PSQL[@]}" -d c360_e2e -c "update private.settings set value = 'workspace' where key = 'access_mode';"
 # Local-only password for the worker login (the hosted one is set by an operator).
 "${PSQL[@]}" -d c360_e2e -c "alter role c360_worker with login password 'local-e2e-only';"
 

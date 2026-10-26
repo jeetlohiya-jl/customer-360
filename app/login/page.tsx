@@ -2,7 +2,8 @@ import { signInWithGoogle } from "./actions";
 
 const MESSAGES: Record<string, string> = {
   domain: "Only Cirkla Google Workspace accounts can sign in.",
-  inactive: "Your access is not active. Ask an administrator.",
+  inactive: "Your access is not active. Ask a Customer 360 admin.",
+  not_invited: "Customer 360 is invite-only. Ask a Customer 360 admin to invite you, then sign in again.",
   oauth_start: "Sign-in could not start. Try again.",
   callback: "Sign-in did not complete. Try again.",
 };

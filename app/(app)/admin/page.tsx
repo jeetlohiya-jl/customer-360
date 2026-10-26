@@ -1,11 +1,13 @@
 import { requireAdmin } from "@/lib/auth/session";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
-import { changeRole } from "../actions";
+import { changeRole, inviteUser, revokeAccess } from "../actions";
 import { getExtractConfig } from "@/lib/extract/config";
 import { retryFailedExtraction } from "../facts/actions";
 import { getSyncConfig } from "@/lib/sync/config";
 
 type UserRow = { id: string; email: string; role: string; status: string; created_at: string };
+type InviteRow = { email: string; invited_at: string | null; invited_by_email: string | null; note: string | null; user_status: string | null; signed_in: boolean };
+const OK: Record<string, string> = { role: "Role updated.", invited: "Invited. They can sign in now.", revoked: "Access removed. Their data is kept; inviting them again restores access." };
 type AuditRow = { id: number; at: string; action: string; target: string | null; actor_email: string | null };
 
 export default async function AdminPage({
@@ -18,11 +20,13 @@ export default async function AdminPage({
   const supabase = await createSupabaseServerClient();
 
   // Both reads are bounded and go through RLS (admins only).
-  const [{ data: users }, { data: audit }, { data: scans }] = await Promise.all([
+  const [{ data: users }, { data: audit }, { data: scans }, { data: invitesData }] = await Promise.all([
     supabase.from("app_users").select("id, email, role, status, created_at").order("email").limit(200),
     supabase.rpc("recent_audit", { max_rows: 50 }),
     supabase.rpc("scan_jobs_overview"),
+    supabase.rpc("access_invites_list"),
   ]);
+  const invites = (invitesData ?? []) as InviteRow[];
   const extractOn = getExtractConfig().enabled;
   const { data: extraction } = extractOn ? await supabase.rpc("extraction_overview") : { data: null };
   const { data: failuresData } = extractOn ? await supabase.rpc("extraction_failures") : { data: null };
@@ -49,7 +53,60 @@ export default async function AdminPage({
           Could not complete that change: {error}
         </p>
       ) : null}
-      {ok ? <p className="notice">Role updated.</p> : null}
+      {ok ? <p className="notice">{OK[ok] ?? "Saved."}</p> : null}
+
+      <section className="card section">
+        <span className="eyebrow">Access · invite-only</span>
+        <p className="small">
+          Only invited people can use Customer 360 and the Slack assistant. Removing someone takes effect at once; their
+          mailbox stops being scanned, and the emails and facts already collected are kept.
+        </p>
+        <form action={inviteUser} className="form-row mt-16">
+          <input type="email" name="email" required maxLength={254} placeholder="name@gocirkla.com" aria-label="Email to invite" />
+          <input type="text" name="note" maxLength={200} placeholder="Note (optional)" aria-label="Note" />
+          <button type="submit" className="btn-secondary">Invite</button>
+        </form>
+        <div className="table-wrap mt-16">
+          <table>
+            <thead>
+              <tr>
+                <th>Email</th>
+                <th>Access</th>
+                <th>Invited</th>
+                <th>Note</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>
+              {invites.map((i) => {
+                const invited = i.invited_at !== null;
+                const access = !invited ? "asked to sign in, not invited" : i.user_status === "active" ? "active" : i.signed_in ? i.user_status ?? "" : "invited, not signed in yet";
+                return (
+                  <tr key={i.email}>
+                    <td>{i.email}</td>
+                    <td>{access}</td>
+                    <td className="small">{invited ? `${new Date(i.invited_at!).toISOString().slice(0, 10)}${i.invited_by_email ? ` by ${i.invited_by_email}` : ""}` : ""}</td>
+                    <td className="small">{i.note ?? ""}</td>
+                    <td>
+                      {invited ? (
+                        <form action={revokeAccess} className="inline">
+                          <input type="hidden" name="email" value={i.email} />
+                          <button type="submit" className="btn-secondary" disabled={i.email === me.email.toLowerCase()}>Remove access</button>
+                        </form>
+                      ) : (
+                        <form action={inviteUser} className="inline">
+                          <input type="hidden" name="email" value={i.email} />
+                          <button type="submit" className="btn-secondary">Invite</button>
+                        </form>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      </section>
 
       <section className="card section">
         <span className="eyebrow">01 · Users</span>

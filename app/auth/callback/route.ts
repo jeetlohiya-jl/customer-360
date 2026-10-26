@@ -29,6 +29,12 @@ export async function GET(request: NextRequest) {
   }
 
   // Audit the sign-in (security definer function; writes actor = auth.uid()).
-  await supabase.rpc("record_sign_in");
+  // It refuses anyone who is not active: not invited (0014), suspended or departed.
+  const { error: signInError } = await supabase.rpc("record_sign_in");
+  if (signInError) {
+    await supabase.auth.signOut();
+    console.warn(JSON.stringify({ event: "sign_in_rejected", reason: "not_invited_or_inactive" }));
+    return NextResponse.redirect(`${base}/login?error=not_invited`);
+  }
   return NextResponse.redirect(`${base}/dashboard`);
 }
