@@ -3,6 +3,8 @@
 begin;
 create extension if not exists pgtap with schema extensions;
 select plan(101);
+-- The worker role is switched into below; on hosted-style stacks the test login is not a superuser.
+grant c360_worker to current_user;
 
 -- ---- Fixtures ----------------------------------------------------------------------
 insert into auth.users (id, email, raw_user_meta_data) values

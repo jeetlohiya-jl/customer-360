@@ -2,6 +2,8 @@
 begin;
 create extension if not exists pgtap with schema extensions;
 select plan(52);
+-- The worker role is switched into below; on hosted-style stacks the test login is not a superuser.
+grant c360_worker to current_user;
 
 insert into auth.users (id, email, raw_user_meta_data) values
   ('00000000-0000-4000-8000-0000000006a1', 't6.owner@gocirkla.com', '{"custom_claims":{"hd":"gocirkla.com"}}'),

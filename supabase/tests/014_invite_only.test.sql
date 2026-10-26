@@ -2,6 +2,8 @@
 begin;
 create extension if not exists pgtap with schema extensions;
 select plan(27);
+-- The worker role is switched into below; on hosted-style stacks the test login is not a superuser.
+grant c360_worker to current_user;
 
 create function pg_temp.act_as(p_user uuid) returns void language sql as $$
   select set_config('request.jwt.claims', json_build_object('sub', p_user, 'role', 'authenticated')::text, true);

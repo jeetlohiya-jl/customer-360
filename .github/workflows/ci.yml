@@ -92,6 +92,8 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
+      # The local auth stub creates the pgtap extension, so install it like the database-all job does.
+      - run: sudo apt-get update && sudo apt-get install -y postgresql-16-pgtap
       # The runner image ships PostgreSQL 16 binaries; no service or hosted project is used.
       - run: PGBIN=/usr/lib/postgresql/16/bin bash scripts/scan-e2e-local.sh
 

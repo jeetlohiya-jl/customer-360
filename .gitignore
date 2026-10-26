@@ -23,6 +23,8 @@
 # misc
 .DS_Store
 *.pem
+# Synthetic test CA certificate (public certificate only, no key) for tests/unit/scan-config.test.ts
+!tests/fixtures/test-ca.pem
 
 # debug
 npm-debug.log*
