@@ -158,7 +158,7 @@ export default async function FactsPage({ searchParams }: { searchParams: Promis
               <tbody>
                 {customers.slice(0, 50).map((c) => (
                   <tr key={c.customer_id}>
-                    <td><Link href={qs({ customer: c.customer_id })}>{c.customer_name}</Link></td>
+                    <td><Link href={qs({ customer: c.customer_id })} prefetch={false}>{c.customer_name}</Link></td>
                     <td>{c.facts}</td><td>{c.open_facts}</td><td>{c.needs_review}</td><td>{fmt.format(new Date(c.last_fact_at))}</td>
                   </tr>
                 ))}
@@ -232,7 +232,7 @@ export default async function FactsPage({ searchParams }: { searchParams: Promis
                   return (
                     <tr key={x.fact_id}>
                       <td>{fmt.format(new Date(x.message_at))}</td>
-                      <td><Link href={qs({ customer: x.customer_id, after: undefined })}>{x.customer_name}</Link></td>
+                      <td><Link href={qs({ customer: x.customer_id, after: undefined })} prefetch={false}>{x.customer_name}</Link></td>
                       <td>{TYPE[x.fact_type] ?? x.fact_type}</td>
                       <td>{STANCE[x.stance] ?? x.stance}{x.basis === "inferred" ? " (inferred)" : ""} by {x.party === "cirkla" ? "Cirkla" : x.party}: {x.summary}</td>
                       <td className="small">{details(x)}</td>

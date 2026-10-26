@@ -20,21 +20,24 @@ export default async function AdminPage({
   const supabase = await createSupabaseServerClient();
 
   // Both reads are bounded and go through RLS (admins only).
-  const [{ data: users }, { data: audit }, { data: scans }, { data: invitesData }] = await Promise.all([
+  const extractOn = getExtractConfig().enabled;
+  const syncOn = getSyncConfig().enabled;
+  const none = Promise.resolve({ data: null });
+  // Every read on this page is independent: one parallel round instead of four sequential ones.
+  const [{ data: users }, { data: audit }, { data: scans }, { data: invitesData }, { data: extraction }, { data: failuresData }, { data: syncData }] = await Promise.all([
     supabase.from("app_users").select("id, email, role, status, created_at").order("email").limit(200),
     supabase.rpc("recent_audit", { max_rows: 50 }),
     supabase.rpc("scan_jobs_overview"),
     supabase.rpc("access_invites_list"),
+    extractOn ? supabase.rpc("extraction_overview") : none,
+    extractOn ? supabase.rpc("extraction_failures") : none,
+    syncOn ? supabase.rpc("sync_overview") : none,
   ]);
   const invites = (invitesData ?? []) as InviteRow[];
-  const extractOn = getExtractConfig().enabled;
-  const { data: extraction } = extractOn ? await supabase.rpc("extraction_overview") : { data: null };
-  const { data: failuresData } = extractOn ? await supabase.rpc("extraction_failures") : { data: null };
   const failures = (failuresData ?? []) as { code: string; failed: number; retrying: number }[];
   type ExtractRow = { month: string; cap_usd: number; spent_usd: number; reserved_usd: number; paused: boolean; pending: number; extracted: number; skipped: number; failed: number; needs_reconnect: number; facts_auto: number; facts_needs_review: number; facts_reviewed: number };
   const ex = ((extraction ?? []) as ExtractRow[])[0];
-  const syncOn = getSyncConfig().enabled;
-  const { data: syncData } = syncOn ? await supabase.rpc("sync_overview") : { data: null };
+
   type SyncRow = { mailbox_email: string; mode: string; last_synced_at: string | null; last_push_at: string | null; watch_expires_at: string | null; processed: number; linked: number; last_error: string | null };
   const syncRows = (syncData ?? []) as SyncRow[];
   const when = (v: string | null) => (v ? new Date(v).toISOString().replace("T", " ").slice(0, 16) : "never");

@@ -8,8 +8,11 @@ export default async function CustomersPage({ searchParams }: { searchParams: Pr
   await requireAdmin();
   const { q, error } = await searchParams;
   const supabase = await createSupabaseServerClient();
-  const master = await loadCustomerMaster(supabase);
-  const { data: queue } = await supabase.rpc("review_queue_list", { p_limit: 500 });
+  // In parallel: the customer list and the review queue are independent.
+  const [master, { data: queue }] = await Promise.all([
+    loadCustomerMaster(supabase),
+    supabase.rpc("review_queue_list", { p_limit: 500 }),
+  ]);
 
   const aliasesBy = new Map<string, string[]>();
   for (const a of master.aliases) aliasesBy.set(a.customer_id, [...(aliasesBy.get(a.customer_id) ?? []), a.alias]);
@@ -78,7 +81,7 @@ export default async function CustomersPage({ searchParams }: { searchParams: Pr
               <tbody>
                 {rows.slice(0, 500).map((c) => (
                   <tr key={c.id}>
-                    <td><Link href={`/customers/${c.id}`}>{c.canonical_name}</Link></td>
+                    <td><Link href={`/customers/${c.id}`} prefetch={false}>{c.canonical_name}</Link></td>
                     <td className="small">{(aliasesBy.get(c.id) ?? []).slice(0, 4).join(", ")}{(aliasesBy.get(c.id)?.length ?? 0) > 4 ? " …" : ""}</td>
                     <td className="small">{(idsBy.get(c.id) ?? []).slice(0, 3).join(", ")}{(idsBy.get(c.id)?.length ?? 0) > 3 ? " …" : ""}</td>
                     <td><span className={c.status === "active" ? "pill" : "pill off"}>{c.status}</span></td>

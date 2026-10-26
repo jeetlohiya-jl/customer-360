@@ -32,29 +32,29 @@ export default async function SearchPage({ searchParams }: { searchParams: Promi
   const params: SearchParams = parsed.ok ? parsed.params : {};
   const supabase = await createSupabaseServerClient();
 
-  const [{ data: customersData }, search] = await Promise.all([
+  // All three reads are independent: run them together.
+  const wantCounts = user.role === "admin" && parsed.ok;
+  const [{ data: customersData }, search, countsResult] = await Promise.all([
     supabase.rpc("my_linked_customers"),
     parsed.ok ? supabase.rpc("search_my_links", rpcArgs(params)) : Promise.resolve({ data: [], error: null }),
+    wantCounts
+      ? supabase.rpc("admin_link_counts", {
+          p_query: params.q ?? null,
+          p_customer: null,
+          p_from: params.from ?? null,
+          p_to: params.to ?? null,
+          p_limit: 100,
+          p_offset: 0,
+        })
+      : Promise.resolve(null),
   ]);
   const customers = (customersData ?? []) as LinkedCustomer[];
   const failed = Boolean(search.error);
   const { rows, next } = paginate(((search.data ?? []) as Row[]) ?? []);
   const myMailbox = rows[0]?.mailbox_email;
 
-  let counts: CountRow[] = [];
-  let countsFailed = false;
-  if (user.role === "admin" && parsed.ok) {
-    const r = await supabase.rpc("admin_link_counts", {
-      p_query: params.q ?? null,
-      p_customer: null,
-      p_from: params.from ?? null,
-      p_to: params.to ?? null,
-      p_limit: 100,
-      p_offset: 0,
-    });
-    counts = (r.data ?? []) as CountRow[];
-    countsFailed = Boolean(r.error);
-  }
+  const counts: CountRow[] = (countsResult?.data ?? []) as CountRow[];
+  const countsFailed = Boolean(countsResult?.error);
 
   return (
     <>

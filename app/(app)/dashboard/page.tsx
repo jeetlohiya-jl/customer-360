@@ -69,13 +69,16 @@ export default async function DashboardPage({
   const scanOn = scanConfig.enabled;
   const scanMisconfigured = !scanConfig.enabled && scanConfig.reason === "misconfigured";
   const supabase = await createSupabaseServerClient();
-  const { data: jobsData } = await supabase.rpc("my_scan_jobs");
-  const jobs = (jobsData ?? []) as ScanJob[];
   const extractOn = getExtractConfig().enabled;
-  const { data: exData } = extractOn ? await supabase.rpc("my_extraction_status") : { data: null };
+  // Independent reads (two database calls and the live Gmail panel) run together.
+  const [{ data: jobsData }, { data: exData }, panel] = await Promise.all([
+    supabase.rpc("my_scan_jobs"),
+    extractOn ? supabase.rpc("my_extraction_status") : Promise.resolve({ data: null }),
+    loadGmailPanel(user),
+  ]);
+  const jobs = (jobsData ?? []) as ScanJob[];
   const ex = ((exData ?? []) as { pending: number; extracted: number; skipped: number; failed: number; needs_reconnect: number; facts: number; facts_needs_review: number }[])[0];
   const features = featureSummary();
-  const panel = await loadGmailPanel(user);
   const notice = gmail ? NOTICES[gmail] : undefined;
 
   return (

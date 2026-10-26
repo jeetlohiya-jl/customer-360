@@ -118,6 +118,7 @@ Every variable is listed in [`.env.example`](.env.example) with placeholders onl
 
 - Slack DM assistant: [`docs/phases/phase-4-slack.md`](docs/phases/phase-4-slack.md).
 - New email sync (Gmail push + safety net): [`docs/phases/phase-5-sync.md`](docs/phases/phase-5-sync.md).
+- Speed (fact visibility checked once, parallel reads, fewer prefetches): [`docs/phases/phase-8-performance.md`](docs/phases/phase-8-performance.md).
 - Invite-only access to the app and the Slack assistant (Admin → Access): [`docs/phases/phase-7-invite-only.md`](docs/phases/phase-7-invite-only.md).
 - Colleagues' internal emails in customer threads, CRM tickets, "Find past emails" (targeted re-scan), deleted-email handling and audit of direct changes: [`docs/phases/phase-6-internal-threads.md`](docs/phases/phase-6-internal-threads.md).
 
