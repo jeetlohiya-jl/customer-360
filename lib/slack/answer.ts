@@ -240,8 +240,21 @@ export function buildAnswerPrompt(question: string, customers: CustomerMatch[], 
 const escapeSlack = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 
 /** Link to the Facts page for one customer (evidence quotes, source emails, review). */
-export function factsPageUrl(appUrl: string, customerId: string): string {
-  return `${appUrl.replace(/\/+$/, "")}/facts?customer=${encodeURIComponent(customerId)}`;
+export function factsPageUrl(appUrl: string, customerId: string, range?: { from: string; to: string }): string {
+  const days = range ? `&from=${range.from}&to=${range.to}` : "";
+  return `${appUrl.replace(/\/+$/, "")}/facts?customer=${encodeURIComponent(customerId)}${days}`;
+}
+
+/** The days (UTC, YYYY-MM-DD) of the cited facts of one customer, so the link opens on exactly those facts. */
+function citedRange(facts: SlackFact[], cited: Set<number>, customerId: string): { from: string; to: string } | undefined {
+  const days = [...cited]
+    .map((n) => facts[n - 1])
+    .filter((f) => f && f.customer_id === customerId)
+    .map((f) => new Date(f.message_at))
+    .filter((d) => !Number.isNaN(d.getTime()))
+    .map((d) => d.toISOString().slice(0, 10))
+    .sort();
+  return days.length ? { from: days[0], to: days[days.length - 1] } : undefined;
 }
 
 /**
@@ -262,7 +275,7 @@ export function renderAnswer(
       .trim(),
   );
   const title = `*${escapeSlack(opts.customers.map((c) => c.customer_name).join(", "))}*`;
-  const links = opts.customers.map((c) => `<${factsPageUrl(opts.appUrl, c.customer_id)}|${opts.customers.length > 1 ? escapeSlack(c.customer_name) : "evidence and sources"}>`);
+  const links = opts.customers.map((c) => `<${factsPageUrl(opts.appUrl, c.customer_id, citedRange(facts, cited, c.customer_id))}|${opts.customers.length > 1 ? escapeSlack(c.customer_name) : "evidence and sources"}>`);
   const footer = `_From ${cited.size || facts.length} stored fact${(cited.size || facts.length) === 1 ? "" : "s"} · ${links.join(" · ")}_`;
   let text = `${title}\n${body}\n${footer}`;
   if (text.length > MAX_REPLY_CHARS) text = `${text.slice(0, MAX_REPLY_CHARS - 1)}…`;

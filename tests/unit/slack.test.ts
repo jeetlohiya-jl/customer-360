@@ -162,13 +162,21 @@ describe("question handling (pure)", () => {
   });
 
   it("the reply is short: customer, answer without fact ids, one evidence link", () => {
-    const facts = [fact(), fact({ fact_id: "f2", summary: "PO came in", evidence_quote: "PO attached" })];
+    const facts = [fact(), fact({ fact_id: "f2", summary: "PO came in", evidence_quote: "PO attached", message_at: "2026-09-13T23:30:00.000Z" })];
     const out = renderAnswer("Quoted $0.21/tray FOB.\n• 12 Sep: quoted $0.21 [F1]\n• 13 Sep: PO came in (unverified) [F2, UNVERIFIED][F9] <!channel>", facts,
       { customers: ACME, appUrl: "https://c360.example/" });
     expect(out.cited).toBe(2);
     expect(out.text).toBe(
       "*Acme Foods*\nQuoted $0.21/tray FOB.\n• 12 Sep: quoted $0.21\n• 13 Sep: PO came in (unverified) &lt;!channel&gt;\n" +
-      "_From 2 stored facts · <https://c360.example/facts?customer=c1|evidence and sources>_");
+      "_From 2 stored facts · <https://c360.example/facts?customer=c1&from=2026-09-12&to=2026-09-13|evidence and sources>_");
+  });
+
+  it("the evidence link opens on the cited days only; no citations means all facts", () => {
+    const facts = [fact({ message_at: "2026-10-24T18:06:00Z" }), fact({ fact_id: "f2", summary: "Older", evidence_quote: "older", message_at: "2026-10-20T09:00:00Z" })];
+    expect(renderAnswer("24 Oct: kept the old quote. [F1]", facts, { customers: ACME, appUrl: "https://c360.example" }).text)
+      .toContain("facts?customer=c1&from=2026-10-24&to=2026-10-24|");
+    expect(renderAnswer("Nothing cited.", facts, { customers: ACME, appUrl: "https://c360.example" }).text)
+      .toContain("facts?customer=c1|");
   });
 
   it("no facts on the asked topic: a direct reply with the latest activity, no AI call needed", () => {
