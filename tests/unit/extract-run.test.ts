@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { GmailError } from "@/lib/gmail/google";
 import { ModelError, reservationMicroUsd, costMicroUsd } from "@/lib/extract/model";
 import { prepareMessage, runExtractTick, type ClaimedItem, type ExtractDb, type ExtractGmail } from "@/lib/extract/run";
-import { buildUserMessage } from "@/lib/extract/prompt";
+import { buildUserMessage, headerPeople } from "@/lib/extract/prompt";
 import type { CommitFact } from "@/lib/extract/validate";
 import { CASES, CUSTOMERS, mkMessage, OWNER_EMAIL, PLANTED } from "../fixtures/synthetic-emails";
 
@@ -172,6 +172,23 @@ describe("extraction run", () => {
     const priv = mkMessage({ id: "int2", from: "vb@gocirkla.com", to: OWNER_EMAIL, subject: "Confidential salary review", body });
     expect(prepareMessage(priv, { ...base, direction: "internal" }, [], new Set())).toEqual({ kind: "skip", reason: "excluded" });
     expect(buildUserMessage({ customers: CUSTOMERS, date: "2026-10-09", direction: "outbound", openFacts: [], text: "x" })).toContain("sent BY Cirkla to the customer");
+  });
+
+  it("the prompt says who wrote the email and who received it, by name only (x6)", () => {
+    expect(headerPeople('"Agarwal, Vaibhav" <vaibhav.agarwal@gocirkla.com>, greg@premiofoods.com, Glenn Divers <glenn.divers@gocirkla.com>', "gocirkla.com"))
+      .toEqual(["Agarwal, Vaibhav (Cirkla)", "Greg (premiofoods.com)", "Glenn Divers (Cirkla)"]);
+    expect(headerPeople("x9@example.com", "gocirkla.com")).toEqual([]); // no readable name: left out
+    expect(headerPeople(undefined, "gocirkla.com")).toEqual([]);
+    const body = "Glenn, we can stick to the old quote. Please update the contract terms page and send it to me.";
+    const msg = mkMessage({ id: "ppl1", from: "Vaibhav <vaibhav@gocirkla.com>", to: "Glenn Divers <glenn.divers@gocirkla.com>",
+      headers: { Cc: "david.woods@gocirkla.com" }, subject: "Premio Pricing", body });
+    const ok = prepareMessage(msg, { mailbox_email: "glenn.divers@gocirkla.com", message_at: "2026-10-24T18:06:00.000Z", customers: CUSTOMERS, direction: "internal" }, [], new Set());
+    expect(ok.kind).toBe("ready");
+    if (ok.kind !== "ready") return;
+    expect(ok.prompt).toContain("From (the writer): Vaibhav (Cirkla)");
+    expect(ok.prompt).toContain("To: Glenn Divers (Cirkla)");
+    expect(ok.prompt).toContain("Cc: David Woods (Cirkla)");
+    expect(ok.prompt).not.toContain("@");
   });
 
   it("the worst-case reservation always covers the real cost", () => {

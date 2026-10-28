@@ -24,7 +24,7 @@ export function verifySlackSignature(
 /** The parts of a Slack Events API payload the bot uses. Everything else is ignored. */
 export type SlackEnvelope =
   | { kind: "url_verification"; challenge: string }
-  | { kind: "dm"; eventId: string; user: string; channel: string; text: string }
+  | { kind: "dm"; eventId: string; user: string; channel: string; text: string; ts?: string }
   | { kind: "ignore" };
 
 /** Only plain messages a person types in a DM with the bot. Bot messages, edits, joins, files etc. are ignored. */
@@ -40,5 +40,6 @@ export function parseEnvelope(body: unknown): SlackEnvelope {
   if (typeof e.user !== "string" || !/^[UW][A-Z0-9]{2,20}$/.test(e.user)) return { kind: "ignore" };
   if (typeof e.channel !== "string" || !/^D[A-Z0-9]{2,20}$/.test(e.channel)) return { kind: "ignore" };
   if (typeof e.text !== "string" || e.text.trim() === "") return { kind: "ignore" };
-  return { kind: "dm", eventId: b.event_id, user: e.user, channel: e.channel, text: e.text };
+  const ts = typeof e.ts === "string" && /^\d{9,11}\.\d{1,8}$/.test(e.ts) ? e.ts : undefined;
+  return { kind: "dm", eventId: b.event_id, user: e.user, channel: e.channel, text: e.text, ...(ts ? { ts } : {}) };
 }

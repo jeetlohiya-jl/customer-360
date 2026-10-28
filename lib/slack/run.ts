@@ -9,7 +9,7 @@ import { costMicroUsd, ModelError, type Usage } from "@/lib/extract/model";
 import { MODEL_ID } from "@/lib/extract/prompt";
 import { redact } from "@/lib/extract/redact";
 import { errorCode } from "@/lib/scan/errors";
-import { buildAnswerPrompt, focusPeople, HELP_TEXT, isHelp, LATEST_FACTS, noTopicFacts, pickCustomers, renderAnswer, selectFacts, topicTypes, wantsLatest, wantsOpenItems, type CustomerMatch, type SlackFact } from "./answer";
+import { buildAnswerPrompt, focusPeople, HELP_TEXT, HISTORY_FETCH, isHelp, LATEST_FACTS, noTopicFacts, pickCustomers, renderAnswer, selectFacts, selectHistory, topicTypes, wantsHistory, wantsLatest, wantsOpenItems, type CustomerMatch, type SlackFact } from "./answer";
 import { SlackError, type SlackApi } from "./api";
 import { answerReservationMicroUsd, type AnswerModel } from "./model";
 
@@ -37,6 +37,18 @@ export interface DmEvent {
   user: string;
   channel: string;
   text: string;
+  /** Slack message timestamp; lets a follow-up use the person's previous message. */
+  ts?: string;
+}
+
+/** Earlier messages count as the same conversation for this long. */
+export const FOLLOW_UP_SECONDS = 30 * 60;
+
+/** Words left once the customer's name is removed: "Premio" or "for premio?" leaves none that matter. */
+const FILLER = new Set(["for", "on", "about", "with", "the", "of", "customer", "account", "please", "pls", "plz", "and", "to", "in", "it", "is"]);
+export function isBareName(question: string, customers: CustomerMatch[]): boolean {
+  const rest = customers.reduce((q, c) => q.replace(new RegExp(c.matched.split(" ").map((w) => w.replace(/[^a-z0-9]/gi, "")).filter(Boolean).join("[^a-z0-9]+"), "gi"), " "), question);
+  return rest.toLowerCase().split(/[^a-z0-9']+/).filter((w) => w && !FILLER.has(w)).length === 0;
 }
 
 export type DmOutcome =
@@ -79,8 +91,29 @@ export async function handleDm(deps: SlackDeps, ev: DmEvent): Promise<DmOutcome>
       return (outcome = "rate_limited");
     }
 
-    const question = redact(ev.text.slice(0, 1000)).text;
-    const customers = pickCustomers(await deps.db.customers(question));
+    let question = redact(ev.text.slice(0, 1000)).text;
+    let customers = pickCustomers(await deps.db.customers(question));
+    // Follow-ups: "summary since the beginning of this account" after asking about Premio
+    // uses Premio; a bare "Premio" after a question with no customer answers that question.
+    // The earlier messages are read from Slack for this reply only, never stored.
+    if (ev.ts && (customers.length === 0 || isBareName(question, customers))) {
+      const earlier = await deps.slack.earlierMessages(ev.channel, ev.user, ev.ts, FOLLOW_UP_SECONDS).catch(() => []);
+      for (const m of earlier.slice(0, 3)) {
+        const text = redact(m.text).text;
+        const theirs = pickCustomers(await deps.db.customers(text));
+        if (customers.length === 0 && theirs.length > 0) {
+          customers = theirs;
+          counts.follow_up = 1;
+          break;
+        }
+        if (customers.length > 0 && theirs.length === 0 && !isHelp(text)) {
+          question = `${text}\n${question}`.slice(0, 1500);
+          counts.follow_up = 1;
+          break;
+        }
+        if (customers.length > 0) break; // the earlier message named a customer: the bare name is a new question
+      }
+    }
     counts.customers = customers.length;
     if (customers.length === 0) {
       await reply(MESSAGES.noCustomer);
@@ -88,17 +121,18 @@ export async function handleDm(deps: SlackDeps, ev: DmEvent): Promise<DmOutcome>
     }
 
     // Colleagues' names are always shown (decision D2 changed 2026-10-22: answers name people).
-    const all = await deps.db.facts(who.user_id, customers.map((c) => c.customer_id), true, 120);
+    // Topic words come from the question minus the customer's name ("Quality Meats" is not a quality question).
+    const topicText = customers.reduce((q, c) => q.replace(new RegExp(c.matched.split(" ").map((w) => w.replace(/[^a-z0-9]/g, "")).filter(Boolean).join("[^a-z0-9]+"), "gi"), " "), question);
+    const openItems = wantsOpenItems(topicText);
+    const history = !openItems && wantsHistory(question);
+    const all = await deps.db.facts(who.user_id, customers.map((c) => c.customer_id), true, history ? HISTORY_FETCH : 120);
     if (all.length === 0) {
       await reply(MESSAGES.noFacts(customers.map((c) => c.customer_name).join(", ")));
       return (outcome = "no_facts");
     }
-    // Topic words come from the question minus the customer's name ("Quality Meats" is not a quality question).
-    const topicText = customers.reduce((q, c) => q.replace(new RegExp(c.matched.split(" ").map((w) => w.replace(/[^a-z0-9]/g, "")).filter(Boolean).join("[^a-z0-9]+"), "gi"), " "), question);
     const types = topicTypes(topicText);
-    const openItems = wantsOpenItems(topicText);
-    const latest = !openItems && wantsLatest(question);
-    const selected = selectFacts(all, types, { openFirst: openItems });
+    const latest = !history && !openItems && wantsLatest(question);
+    const selected = history ? selectHistory(types.length ? all.filter((f) => types.includes(f.fact_type)) : all) : selectFacts(all, types, { openFirst: openItems });
     const facts = latest ? selected.slice(0, LATEST_FACTS) : selected;
     counts.facts = facts.length;
     if (facts.length === 0) {
@@ -109,6 +143,7 @@ export async function handleDm(deps: SlackDeps, ev: DmEvent): Promise<DmOutcome>
 
     const prompt = buildAnswerPrompt(question, customers, facts, deps.today ?? new Date().toISOString().slice(0, 10), {
       latest,
+      history,
       openItems,
       focus: focusPeople(question, facts),
     });

@@ -53,7 +53,9 @@ select is((select count(*) from private.worker_sync_token('00000000-0000-4000-80
 
 -- ---- Commit: links feed extraction ------------------------------------------------------------
 select is(private.worker_sync_commit('00000000-0000-4000-8000-0000000011a1',
-  '{"history_id":null,"catchup_history_id":"5001","catchup_page_token":"tok2","done":false,"watch_expires_at":"2026-10-30T00:00:00Z"}',
+  -- The watch expiry is relative to today, so this test does not start failing once a fixed date is near.
+  jsonb_build_object('history_id', null, 'catchup_history_id', '5001', 'catchup_page_token', 'tok2', 'done', false,
+                     'watch_expires_at', to_char((now() + interval '7 days') at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"')),
   '[{"customer_id":"00000000-0000-4000-8000-00000000c11a","gmail_message_id":"s11m1","gmail_thread_id":null,"message_at":"2026-10-20T10:00:00Z","direction":"inbound","customer_addresses":[],"evidence":[],"score":0.9}]',
   '[]', '{"processed":3}', 'm1'), 'ok', 'a catch-up step commits');
 select is(pg_temp.links('00000000-0000-4000-8000-0000000011a1'), 1::bigint, 'the new customer email is linked');

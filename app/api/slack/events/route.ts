@@ -50,7 +50,7 @@ export async function POST(request: NextRequest) {
           appUrl,
           log: (e) => console.info(JSON.stringify(e)),
         },
-        { eventId: envelope.eventId, user: envelope.user, channel: envelope.channel, text: envelope.text },
+        { eventId: envelope.eventId, user: envelope.user, channel: envelope.channel, text: envelope.text, ts: envelope.ts },
       );
     } finally {
       await worker.close().catch(() => {});

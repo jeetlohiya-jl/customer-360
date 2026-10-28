@@ -14,7 +14,7 @@ import { GmailError, isRateLimited, type FullMessage, type MessageHeaders } from
 import { EXCLUDE_LABEL_RE, exclusionRule, type Direction } from "@/lib/scan/classify";
 import { errorCode, errorStage, inStage, StageError } from "@/lib/scan/errors";
 import { costMicroUsd, ModelError, reservationMicroUsd, type ExtractModel, type Usage } from "./model";
-import { buildUserMessage, MODEL_ID } from "./prompt";
+import { buildUserMessage, headerPeople, MODEL_ID } from "./prompt";
 import { redact, type RedactionKind } from "./redact";
 import { cleanBody, mimeText, prefilter, SHORT_REPLY_CHARS, type SkipReason } from "./text";
 import { validateFacts, type CommitFact, type DropReason, type ReviewReason } from "./validate";
@@ -131,6 +131,12 @@ export function prepareMessage(
   const red = redact(clean.text);
   const subject = headers["subject"] ? redact(headers["subject"].slice(0, 200)).text : undefined;
   const context = clean.text.length < SHORT_REPLY_CHARS && clean.replyContext ? redact(clean.replyContext).text : "";
+  const domain = item.mailbox_email.split("@")[1] ?? "";
+  const people = {
+    from: headerPeople(headers["from"], domain),
+    to: headerPeople(headers["to"], domain),
+    cc: headerPeople(headers["cc"], domain),
+  };
   const prompt = buildUserMessage({
     customers: item.customers,
     date: item.message_at.slice(0, 10),
@@ -139,6 +145,7 @@ export function prepareMessage(
     text: red.text,
     subject,
     replyContext: context || undefined,
+    people,
   });
   return { kind: "ready", prompt, text: red.text, context, truncated: clean.truncated, redactions: red.counts };
 }
