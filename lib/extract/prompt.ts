@@ -3,7 +3,7 @@
  * Versioned: every stored fact records PROMPT_VERSION.
  */
 
-export const PROMPT_VERSION = "x4";
+export const PROMPT_VERSION = "x6";
 export const MODEL_ID = "claude-haiku-5-5";
 export const MAX_OUTPUT_TOKENS = 1500;
 
@@ -32,6 +32,7 @@ Stance (be strict; this matters most):
 - cancellation: something is withdrawn, put on hold or cancelled.
 
 party: who made the statement: customer, cirkla or unclear. Direction tells you who sent the email.
+Internal emails (Direction: internal) are between Cirkla colleagues about the customer and were not sent to the customer. Record Cirkla's own decisions, plans, prices worked out, sample and shipping arrangements and actions owed by named colleagues (party: cirkla). A customer's statement quoted inside an internal email is still party customer. Never record colleagues' opinions of people, internal disagreements or anything personal.
 basis: explicit if the email states it directly; inferred if you are reading between the lines.
 status: open, resolved, cancelled, not_applicable or unknown. status_basis: explicit, inferred, or none when status is unknown or not_applicable.
 
@@ -40,7 +41,8 @@ Earlier open facts for this customer are listed with their ids. If this email re
 Rules:
 - Use only information in this email. Never guess numbers, dates, prices or currencies. Leave a field null when it is not stated.
 - evidence_quote: copy at most 200 characters VERBATIM from the email that supports the fact. Do not paraphrase inside the quote.
-- summary: one plain sentence, at most 300 characters. Name the person who said, asked or agreed it when the email shows who (greeting or sign-off), with their company: "Greg (Premio Foods) asked for…", "Glenn (Cirkla) confirmed…". Never invent a name; if it is not clear who, use the company name.
+- summary: one plain sentence, at most 300 characters. Name the person who said, asked or agreed it, with their company: "Greg (Premio Foods) asked for…", "Glenn (Cirkla) confirmed…".
+- Who is who: the "From" line names the person who WROTE this email; everything the email text says is theirs, except a statement it clearly quotes from someone else. "To" and "Cc" name the recipients: name them only as the people asked, told or sent something ("Vaibhav (Cirkla) asked Glenn (Cirkla) to…"). A greeting ("Hi Glenn") names a recipient, never the writer. Use the names exactly as the From/To/Cc lines give them (first name is fine). Never invent a name; if it is not clear who, use the company name.
 - Text shown as [EMAIL], [PHONE], [CARD], [BANK], [GOV_ID], [SECRET], [LINK], [IBAN] or [IFSC] was removed on purpose. Never try to restore it.
 - Do not extract anything about people's health, family, personal life, salaries, immigration, legal disputes or HR matters. Skip those parts entirely.
 - confidence: 0 to 1, how sure you are that the fact, its stance and its numbers are right. Use the full range: 0.9 or more when the email states it plainly, around 0.6 when you are interpreting, below 0.5 when unsure.
@@ -89,7 +91,7 @@ export const OUTPUT_SCHEMA = {
 export interface PromptInput {
   customers: { id: string; name: string }[];
   date: string; // YYYY-MM-DD
-  direction: "inbound" | "outbound";
+  direction: "inbound" | "outbound" | "internal";
   openFacts: { id: string; customer_id: string; type: string; summary: string; date: string }[];
   /** Cleaned, REDACTED email text. */
   text: string;
@@ -97,9 +99,50 @@ export interface PromptInput {
   subject?: string;
   /** REDACTED start of the earlier message, only for short replies. */
   replyContext?: string;
+  /** Names (no addresses) of the writer and recipients, from the From/To/Cc headers. */
+  people?: EmailPeople;
 }
 
-/** The per-email message. Contains no email addresses or mailbox owner identity. */
+export interface EmailPeople {
+  from: string[];
+  to: string[];
+  cc: string[];
+}
+
+const MAX_PEOPLE = 8;
+
+/**
+ * "Vaibhav Agarwal <vaibhav@gocirkla.com>, greg@premiofoods.com" ->
+ * ["Vaibhav Agarwal (Cirkla)", "Greg (premiofoods.com)"]. Addresses are never
+ * returned: a display name is used, or a name read from the address's local part,
+ * plus the company (Cirkla) or the other side's domain.
+ */
+export function headerPeople(value: string | undefined, workspaceDomain: string): string[] {
+  if (!value) return [];
+  const out: string[] = [];
+  for (const part of value.slice(0, 4000).match(/(?:"[^"]*"|[^,"])+/g) ?? []) {
+    const m = part.match(/^\s*(.*?)\s*<([^<>\s]+@[^<>\s]+)>\s*$/) ?? part.match(/^\s*()([^<>\s,]+@[^<>\s,]+)\s*$/);
+    if (!m) continue;
+    const addr = m[2].toLowerCase();
+    const domain = addr.split("@")[1] ?? "";
+    let name = m[1].replace(/^"|"$/g, "").replace(/\s+/g, " ").trim();
+    if (!name || name.includes("@")) name = nameFromLocal(addr.split("@")[0]);
+    if (!name) continue;
+    const company = domain === workspaceDomain.toLowerCase() ? "Cirkla" : domain;
+    const label = `${name.slice(0, 60)} (${company})`;
+    if (!out.includes(label)) out.push(label);
+    if (out.length === MAX_PEOPLE) break;
+  }
+  return out;
+}
+
+function nameFromLocal(local: string): string {
+  const words = local.split(/[._-]+/).filter((w) => /^[a-z][a-z']+$/i.test(w));
+  if (words.length === 0 || words.length > 3) return "";
+  return words.map((w) => w[0].toUpperCase() + w.slice(1).toLowerCase()).join(" ");
+}
+
+/** The per-email message. Contains no email addresses; people appear by name only (headerPeople). */
 export function buildUserMessage(p: PromptInput): string {
   const customers = p.customers.map((c) => `- ${c.name} (id ${c.id})`).join("\n");
   const open = p.openFacts.length
@@ -107,8 +150,18 @@ export function buildUserMessage(p: PromptInput): string {
     : "- none";
   return [
     `Customer(s) this email is linked to:\n${customers}`,
-    `Email date: ${p.date}. Direction: ${p.direction === "inbound" ? "sent BY the customer to Cirkla" : "sent BY Cirkla to the customer"}.`,
+    `Email date: ${p.date}. Direction: ${
+      p.direction === "inbound" ? "sent BY the customer to Cirkla"
+      : p.direction === "internal" ? "internal: between Cirkla colleagues about the customer, not sent to the customer"
+      : "sent BY Cirkla to the customer"}.`,
     `Earlier open facts for these customers:\n${open}`,
+    ...(p.people
+      ? [[
+          `From (the writer): ${p.people.from.join(", ") || "unknown"}`,
+          ...(p.people.to.length ? [`To: ${p.people.to.join(", ")}`] : []),
+          ...(p.people.cc.length ? [`Cc: ${p.people.cc.join(", ")}`] : []),
+        ].join("\n")]
+      : []),
     ...(p.subject ? [`Subject: ${p.subject}`] : []),
     `Email text (cleaned and redacted):\n<<<\n${p.text}\n>>>`,
     ...(p.replyContext ? [`Earlier message (context only; do not quote it):\n<<<\n${p.replyContext}\n>>>`] : []),
