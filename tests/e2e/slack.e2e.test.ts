@@ -23,7 +23,6 @@ const prompts: string[] = [];
 const slack = {
   userEmail: async (id: string) => ({ U0E5ANN: "e5.ann@gocirkla.com", U0E5BEN: "e5.ben@gocirkla.com", U0E5OUT: "x@othercorp.com" })[id] ?? null,
   post: async (channel: string, text: string) => void posts.push({ channel, text }),
-  earlierMessages: async () => [],
 };
 const model: AnswerModel = {
   answer: async (p) => {

@@ -2,11 +2,11 @@ import { createHmac } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import { parseServerEnv } from "@/lib/env";
 import { ModelError } from "@/lib/extract/model";
-import { ANSWER_SYSTEM_PROMPT, buildAnswerPrompt, factLine, focusPeople, HISTORY_FETCH, isHelp, noTopicFacts, personName, pickCustomers, renderAnswer, selectFacts, selectHistory, topicTypes, wantsHistory, wantsLatest, wantsOpenItems, wantsSourceOwner, type SlackFact } from "@/lib/slack/answer";
+import { buildAnswerPrompt, isHelp, noTopicFacts, personName, pickCustomers, renderAnswer, selectFacts, topicTypes, wantsLatest, wantsSourceOwner, type SlackFact } from "@/lib/slack/answer";
 import { SlackError } from "@/lib/slack/api";
 import { parseSlackConfig } from "@/lib/slack/config";
 import { answerReservationMicroUsd } from "@/lib/slack/model";
-import { handleDm, isBareName, MESSAGES, type SlackDb } from "@/lib/slack/run";
+import { handleDm, MESSAGES, type SlackDb } from "@/lib/slack/run";
 import { parseEnvelope, verifySlackSignature } from "@/lib/slack/verify";
 
 const SECRET = "0123456789abcdef0123456789abcdef";
@@ -44,8 +44,6 @@ describe("Slack event parsing", () => {
   const dm = { type: "event_callback", event_id: "Ev01ABC", event: { type: "message", channel_type: "im", user: "U01ABC", channel: "D01XYZ", text: "What's open with Acme?" } };
   it("passes through a person's DM and the URL check", () => {
     expect(parseEnvelope(dm)).toEqual({ kind: "dm", eventId: "Ev01ABC", user: "U01ABC", channel: "D01XYZ", text: "What's open with Acme?" });
-    expect(parseEnvelope({ ...dm, event: { ...dm.event, ts: "1761650100.000100" } })).toMatchObject({ kind: "dm", ts: "1761650100.000100" });
-    expect(parseEnvelope({ ...dm, event: { ...dm.event, ts: "x" } })).not.toHaveProperty("ts");
     expect(parseEnvelope({ type: "url_verification", challenge: "abc" })).toEqual({ kind: "url_verification", challenge: "abc" });
   });
   it.each([
@@ -96,14 +94,14 @@ describe("question handling (pure)", () => {
     expect(p).toContain("What did we quote?");
   });
 
-  it("never names the mailbox owner: the same email sits in several mailboxes, so names come from the summary only", () => {
+  it("names the Cirkla colleague on each fact: sender of our emails, recipient of the customer's", () => {
     const out = buildAnswerPrompt("x", ACME, [
       fact({ source_owner_email: "glenn.divers@gocirkla.com", direction: "outbound" }),
       fact({ fact_id: "f2", summary: "Greg asked for samples", party: "customer", source_owner_email: "cary.newton@gocirkla.com", direction: "inbound" }),
     ], "2026-10-22");
-    expect(out).toContain("email from Cirkla to the customer");
-    expect(out).toContain("email from the customer");
-    expect(out).not.toMatch(/Glenn|Cary|@gocirkla\.com/);
+    expect(out).toContain("from: Glenn Divers (Cirkla)");
+    expect(out).toContain("to: Cary Newton (Cirkla)");
+    expect(out).not.toContain("@gocirkla.com");
     expect(personName("vaibhav@gocirkla.com")).toBe("Vaibhav");
     expect(personName(null)).toBeNull();
   });
@@ -116,70 +114,11 @@ describe("question handling (pure)", () => {
     expect(buildAnswerPrompt("latest?", ACME, [fact()], "2026-10-22", { latest: true })).toContain("Answer style: LATEST.");
   });
 
-  it("history questions get one line per month, with every month represented", () => {
-    for (const q of ["give me a month wise summary since the beginning of this account", "summary of everything that has happened with Premio till date",
-      "full history of Acme", "monthly recap for Acme"]) expect(wantsHistory(q)).toBe(true);
-    for (const q of ["what's the latest on premio?", "what's open with Acme?", "summary of the last email"]) expect(wantsHistory(q)).toBe(false);
-    const months = ["2026-10", "2026-09", "2026-07", "2025-12"];
-    const all = months.flatMap((m, i) => Array.from({ length: 10 }, (_, j) =>
-      fact({ fact_id: `${m}-${j}`, message_at: `${m}-${String(10 + j).padStart(2, "0")}T10:00:00.000Z`, summary: `Item ${i}-${j}`, evidence_quote: `q ${i}-${j}`, fact_type: j === 9 ? "order" : "follow_up" })));
-    const picked = selectHistory(all);
-    expect(new Set(picked.map((f) => f.message_at.slice(0, 7)))).toEqual(new Set(months));
-    expect(picked.filter((f) => f.fact_type === "order")).toHaveLength(4); // the order in each month is kept
-    expect(picked.map((f) => f.message_at)).toEqual([...picked.map((f) => f.message_at)].sort().reverse());
-    expect(buildAnswerPrompt("history", ACME, picked, "2026-10-28", { history: true })).toContain("Answer style: HISTORY.");
-    expect(HISTORY_FETCH).toBeGreaterThan(120);
-  });
-
-  it("answers write dates with the year", () => {
-    expect(ANSWER_SYSTEM_PROMPT).toContain("Always write dates with the year");
-    expect(factLine(fact(), 0)).toContain("12 Sep 2026");
-  });
-
-  it("a bare customer name is a follow-up; a real question is not", () => {
-    const premio = [{ customer_id: "c9", customer_name: "Premio Foods", matched: "premio" }];
-    expect(isBareName("Premio", premio)).toBe(true);
-    expect(isBareName("for premio?", premio)).toBe(true);
-    expect(isBareName("latest on premio", premio)).toBe(false);
-  });
-
   it("finds the question's topic from plain words", () => {
     expect(topicTypes("latest update of premio pricing?")).toEqual(["pricing"]);
     expect(topicTypes("any quality complaints from Acme")).toEqual(["quality_issue"]);
     expect(topicTypes("when does the container ship")).toEqual(["delivery"]);
     expect(topicTypes("Recent updates from fieldale?")).toEqual([]);
-  });
-
-  it("next steps / actionables: every kind of open item, open ones first, nothing filtered by type", () => {
-    const q = "what does David need as next steps on Preferred Packaging? what are the actionables?";
-    expect(wantsOpenItems(q)).toBe(true);
-    expect(topicTypes(q)).toEqual([]); // not just "requirement" because the question says "need"
-    expect(wantsOpenItems("What's open with Acme Foods?")).toBe(true);
-    expect(wantsOpenItems("latest update of premio pricing?")).toBe(false);
-    const facts = [
-      fact({ fact_id: "r1", status: "resolved", summary: "Old quote", evidence_quote: "a" }),
-      fact({ fact_id: "o1", fact_type: "delivery", summary: "Pickup on 22 Oct", evidence_quote: "b" }),
-      fact({ fact_id: "o2", fact_type: "follow_up", summary: "Send 200 samples", evidence_quote: "c" }),
-    ];
-    expect(selectFacts(facts, [], { openFirst: true }).map((f) => f.fact_id)).toEqual(["o1", "o2", "r1"]);
-    expect(selectFacts(facts, []).map((f) => f.fact_id)).toEqual(["r1", "o1", "o2"]);
-    expect(buildAnswerPrompt(q, ACME, facts, "2026-10-23", { openItems: true })).toContain("list the OPEN items, who owes each");
-  });
-
-  it("a colleague named in the question becomes the answer's focus", () => {
-    const facts = [
-      fact({ source_owner_email: "david.woods@gocirkla.com" }),
-      fact({ fact_id: "f2", summary: "Umar (Cirkla) needs 4-5 weeks for samples.", source_owner_email: "glenn.divers@gocirkla.com" }),
-    ];
-    expect(focusPeople("what does David need as next steps?", facts)).toEqual([]); // David is only the mailbox owner
-    expect(focusPeople("what does David need as next steps?", [fact({ summary: "Greg asked David (Cirkla) for a quote." })])).toEqual(["David"]);
-    expect(focusPeople("when will Umar have the samples", facts)).toEqual(["Umar"]);
-    expect(focusPeople("what is open with Acme", facts)).toEqual([]);
-    expect(buildAnswerPrompt("what does David need?", ACME, facts, "2026-10-23", { focus: ["David"] })).toContain("Focus: the question is about David (Cirkla)");
-  });
-
-  it("internal facts say so instead of from/to the customer", () => {
-    expect(factLine(fact({ direction: "internal", source_owner_email: "david.woods@gocirkla.com" }), 0)).toContain("internal Cirkla email");
   });
 
   it("sends only relevant, de-duplicated facts, newest first, at most 25", () => {
@@ -192,21 +131,13 @@ describe("question handling (pure)", () => {
   });
 
   it("the reply is short: customer, answer without fact ids, one evidence link", () => {
-    const facts = [fact(), fact({ fact_id: "f2", summary: "PO came in", evidence_quote: "PO attached", message_at: "2026-09-13T23:30:00.000Z" })];
+    const facts = [fact(), fact({ fact_id: "f2", summary: "PO came in", evidence_quote: "PO attached" })];
     const out = renderAnswer("Quoted $0.21/tray FOB.\n• 12 Sep: quoted $0.21 [F1]\n• 13 Sep: PO came in (unverified) [F2, UNVERIFIED][F9] <!channel>", facts,
       { customers: ACME, appUrl: "https://c360.example/" });
     expect(out.cited).toBe(2);
     expect(out.text).toBe(
       "*Acme Foods*\nQuoted $0.21/tray FOB.\n• 12 Sep: quoted $0.21\n• 13 Sep: PO came in (unverified) &lt;!channel&gt;\n" +
-      "_From 2 stored facts · <https://c360.example/facts?customer=c1&from=2026-09-12&to=2026-09-13|evidence and sources>_");
-  });
-
-  it("the evidence link opens on the cited days only; no citations means all facts", () => {
-    const facts = [fact({ message_at: "2026-10-24T18:06:00Z" }), fact({ fact_id: "f2", summary: "Older", evidence_quote: "older", message_at: "2026-10-20T09:00:00Z" })];
-    expect(renderAnswer("24 Oct: kept the old quote. [F1]", facts, { customers: ACME, appUrl: "https://c360.example" }).text)
-      .toContain("facts?customer=c1&from=2026-10-24&to=2026-10-24|");
-    expect(renderAnswer("Nothing cited.", facts, { customers: ACME, appUrl: "https://c360.example" }).text)
-      .toContain("facts?customer=c1|");
+      "_From 2 stored facts · <https://c360.example/facts?customer=c1|evidence and sources>_");
   });
 
   it("no facts on the asked topic: a direct reply with the latest activity, no AI call needed", () => {
@@ -247,7 +178,7 @@ describe("Slack configuration is fail-safe", () => {
 
 describe("answering a DM", () => {
   const QUESTION = "What did we quote Acme Foods? call me on +1 415 555 0134";
-  function harness(over: Partial<SlackDb> & { modelError?: unknown; email?: string | null; earlier?: { text: string; ts: string }[] } = {}) {
+  function harness(over: Partial<SlackDb> & { modelError?: unknown; email?: string | null } = {}) {
     const posts: string[] = [];
     const logs: string[] = [];
     const prompts: string[] = [];
@@ -264,8 +195,7 @@ describe("answering a DM", () => {
     };
     const deps = {
       db,
-      slack: { userEmail: async () => (over.email === undefined ? "ann@gocirkla.com" : over.email), post: async (_c: string, t: string) => void posts.push(t),
-        earlierMessages: async (): Promise<{ text: string; ts: string }[]> => over.earlier ?? [] },
+      slack: { userEmail: async () => (over.email === undefined ? "ann@gocirkla.com" : over.email), post: async (_c: string, t: string) => void posts.push(t) },
       model: {
         answer: async (p: string) => {
           prompts.push(p);
@@ -316,34 +246,6 @@ describe("answering a DM", () => {
     expect(await handleDm(h.deps, ev)).toBe(outcome);
     expect(h.posts).toEqual([msg]);
     expect(h.prompts).toHaveLength(0);
-  });
-
-  it("follow-up: no customer named, so the customer comes from the person's previous message", async () => {
-    const h = harness({
-      customers: async (q: string) => (/acme/i.test(q) ? [{ customer_id: "c1", customer_name: "Acme Foods", matched: "acme foods" }] : []),
-      earlier: [{ text: "what did we quote Acme Foods?", ts: "1761650000.000100" }],
-    });
-    expect(await handleDm(h.deps, { ...ev, text: "give me a month wise summary since the beginning of this account", ts: "1761650100.000100" })).toBe("answered");
-    expect(h.prompts[0]).toContain("Customer: Acme Foods. Answer style: HISTORY.");
-    expect(h.logs.join("")).toContain('"follow_up":1');
-  });
-
-  it("follow-up: a bare customer name answers the previous question that named none", async () => {
-    const h = harness({
-      customers: async (q: string) => (/acme/i.test(q) ? [{ customer_id: "c1", customer_name: "Acme Foods", matched: "acme foods" }] : []),
-      earlier: [{ text: "give me a month wise summary since the beginning of this account", ts: "1761650000.000100" }],
-    });
-    expect(await handleDm(h.deps, { ...ev, text: "Acme Foods", ts: "1761650100.000100" })).toBe("answered");
-    expect(h.prompts[0]).toContain("Answer style: HISTORY.");
-    expect(h.prompts[0]).toContain("month wise summary");
-  });
-
-  it("without a Slack timestamp nothing earlier is read", async () => {
-    let read = 0;
-    const h = harness({ customers: async () => [] });
-    h.deps.slack.earlierMessages = async () => { read++; return []; };
-    expect(await handleDm(h.deps, { ...ev, text: "summary of this account" })).toBe("no_customer");
-    expect(read).toBe(0);
   });
 
   it("a Slack API error is reported with Slack's error code", async () => {
