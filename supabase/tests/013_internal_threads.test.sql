@@ -5,6 +5,8 @@ create extension if not exists pgtap with schema extensions;
 select plan(40);
 -- The worker role is switched into below; on hosted-style stacks the test login is not a superuser.
 grant c360_worker to current_user;
+-- 0017 queues backfills automatically when customers are added; this file tests the manual path.
+update private.settings set value = 'off' where key = 'auto_backfill';
 
 insert into auth.users (id, email, raw_user_meta_data) values
   ('00000000-0000-4000-8000-0000000013a1', 't13.ann@gocirkla.com',   '{"custom_claims":{"hd":"gocirkla.com"}}'),
