@@ -62,6 +62,15 @@ export function createExtractDb(url: string, ca?: string): { db: ExtractDb; clos
       ]);
       return r?.n ?? 0;
     },
+    async metrics(ownerId, messageId, metrics) {
+      const r = await one<{ n: number }>("select private.worker_extract_metrics($1, $2, $3::jsonb, $4::jsonb) as n", [
+        ownerId,
+        messageId,
+        JSON.stringify({ model: MODEL_ID, prompt_version: PROMPT_VERSION }),
+        JSON.stringify(metrics),
+      ]);
+      return r?.n ?? 0;
+    },
     async skip(ownerId, messageId, reason) {
       await pool.query("select private.worker_extract_skip($1, $2, $3)", [ownerId, messageId, reason]);
     },

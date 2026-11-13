@@ -51,7 +51,7 @@ export default async function CustomerPage({
         <h1 className="h1">{customer.canonical_name}</h1>
         {customer.notes ? <p className="lead">{customer.notes}</p> : null}
         {getExtractConfig().enabled ? (
-          <p className="small"><Link href={`/facts?customer=${customer.id}`}>Customer facts for {customer.canonical_name}</Link></p>
+          <p className="small"><Link href={`/facts?customer=${customer.id}`}>Customer facts for {customer.canonical_name}</Link> · <Link href={`/numbers?customer=${customer.id}`}>Numbers</Link></p>
         ) : null}
       </div>
 

@@ -1,6 +1,6 @@
 import "server-only";
 import { Pool } from "pg";
-import type { CustomerMatch, SlackFact } from "./answer";
+import type { CustomerMatch, SlackFact, SlackMetric } from "./answer";
 import type { SlackDb } from "./run";
 
 /**
@@ -42,6 +42,13 @@ export function createSlackDb(url: string, ca?: string): { db: SlackDb; close: (
         message_at: new Date(f.message_at).toISOString(),
         due_date: f.due_date ? (f.due_date instanceof Date ? f.due_date.toISOString().slice(0, 10) : String(f.due_date)) : null,
       }));
+    },
+    async metrics(userId, customerIds, limit) {
+      const r = await pool.query<Omit<SlackMetric, "message_at"> & { message_at: Date | string }>(
+        "select * from private.worker_slack_metrics($1, $2::uuid[], $3)",
+        [userId, customerIds, limit],
+      );
+      return r.rows.map((m) => ({ ...m, message_at: new Date(m.message_at).toISOString() }));
     },
     async reserve(microUsd) {
       return (await one<{ id: string | null }>("select private.worker_budget_reserve($1) as id", [microUsd]))?.id ?? null;

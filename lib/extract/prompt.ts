@@ -3,17 +3,21 @@
  * Versioned: every stored fact records PROMPT_VERSION.
  */
 
-export const PROMPT_VERSION = "x6";
+export const PROMPT_VERSION = "x7";
 export const MODEL_ID = "claude-haiku-5-5";
-export const MAX_OUTPUT_TOKENS = 1500;
+export const MAX_OUTPUT_TOKENS = 2500;
 
 export const FACT_TYPES = ["requirement", "order", "pricing", "delivery", "quality_issue", "follow_up"] as const;
 export const STANCES = ["request", "proposal", "commitment", "report", "cancellation"] as const;
 export const STATUSES = ["open", "resolved", "cancelled", "not_applicable", "unknown"] as const;
+/** x7: customer numbers (metrics), stored separately from facts (migration 0018). */
+export const METRIC_CATEGORIES = ["production", "packaging_usage", "requirement_forecast", "order_volume", "spend_price", "company_size", "supplier"] as const;
+export const METRIC_PERIODS = ["day", "week", "month", "quarter", "year", "shift", "none"] as const;
+export const METRIC_KINDS = ["actual", "capacity", "forecast", "target", "estimate"] as const;
 
 export const SYSTEM_PROMPT = `You extract business facts from ONE business email between Cirkla (a molded-fiber packaging manufacturer) and one of its customers, for Cirkla's internal customer records.
 
-Return facts only by calling the record_facts tool. Return an empty list when the email holds no business facts.
+Return facts and customer numbers only by calling the record_facts tool. Return empty lists when the email holds none.
 Record only facts a salesperson would want in the customer's record. Never record: meeting scheduling or availability ("tomorrow works", "free after 1:30"), out-of-office or PTO notes, greetings, or carrier/courier service questions. Quality over quantity: one precise fact beats three vague ones, and most routine emails have none.
 
 Fact types:
@@ -48,6 +52,16 @@ Rules:
 - confidence: 0 to 1, how sure you are that the fact, its stance and its numbers are right. Use the full range: 0.9 or more when the email states it plainly, around 0.6 when you are interpreting, below 0.5 when unsure.
 - If a fact is about, or comes from, a company other than the customers listed (for example a carrier, logistics firm, film or packaging supplier, or another customer), set about_other_customer to true.
 - A confirmed FUTURE delivery or shipment is a commitment with status open; it becomes resolved only when an email says it was delivered.
+Customer numbers (the "metrics" list, separate from facts): list every number in this email that tells Cirkla how big the CUSTOMER's business is or what it needs, even when the number is also part of a fact. Categories:
+- production: what they make or process ("1.2M lbs of chicken a week", "250,000 birds a day", "6 lines", "2 shifts")
+- packaging_usage: packaging they use or buy today ("3M trays a month", "40 truckloads of foam trays a year", by tray size)
+- requirement_forecast: volumes they say they will need or expect (annual requirement, forecast, launch or rollout volume, growth)
+- order_volume: how much and how often they order (a truckload every 2 weeks, typical PO size, MOQ they ask for)
+- spend_price: their money figures: budget, target price, the price they pay their current supplier, annual packaging spend. NOT prices Cirkla quotes (those are facts)
+- company_size: plants, stores, distribution centres, SKUs, employees, revenue
+- supplier: their current supplier's volume or share, contract length
+For each number: metric is a short label ("birds processed", "#4 trays used", "plants", "target price #4 tray"); value (value_max as well for a range "200-250k"); unit ("lbs", "birds", "trays", "cases", "truckloads", "plants", "USD per tray"); currency for money; period day/week/month/quarter/year/shift, or none when the email does not say; scope (plant, product or tray size) when stated; kind: actual (today), capacity (what they could do), forecast (what they expect), target (what they aim for or want to pay), estimate (a guess, often by Cirkla); as_of (YYYY or YYYY-MM) only when the email says which year or month; party: who stated it; summary: one sentence with the number and who said it; evidence_quote: verbatim and containing the number.
+Number rules: write the value as a plain number exactly as stated ("1.2M" is 1200000, "50k" is 50000); never convert units or periods and never estimate; a number about a different company (another customer, a competitor, a supplier, a carrier) is not a metric; sample and trial quantities are not metrics unless they state ongoing volume; prices Cirkla quotes and Cirkla's own figures are not metrics; one entry per distinct number; at most 15.
 - "Earlier message" text, when present, is the email this short reply answers. Use it ONLY to understand the reply (e.g. what "Approved" refers to). Extract facts from the reply itself; evidence_quote must come from the reply, not from the earlier message.`;
 
 export const OUTPUT_SCHEMA = {
@@ -84,8 +98,34 @@ export const OUTPUT_SCHEMA = {
         required: ["customer_id", "fact_type", "stance", "party", "basis", "status", "status_basis", "summary", "confidence"],
       },
     },
+    metrics: {
+      type: "array",
+      maxItems: 15,
+      items: {
+        type: "object",
+        properties: {
+          customer_id: { type: "string", description: "One of the customer ids given" },
+          category: { type: "string", enum: [...METRIC_CATEGORIES] },
+          metric: { type: "string", description: "Short label, e.g. birds processed, #4 trays used, plants" },
+          value: { type: "number" },
+          value_max: { type: ["number", "null"], description: "Upper end of a stated range" },
+          unit: { type: ["string", "null"] },
+          currency: { type: ["string", "null"], description: "ISO 4217 code for money" },
+          period: { type: "string", enum: [...METRIC_PERIODS] },
+          scope: { type: ["string", "null"], description: "Plant, product or tray size, if stated" },
+          kind: { type: "string", enum: [...METRIC_KINDS] },
+          as_of: { type: ["string", "null"], description: "YYYY or YYYY-MM, only if stated" },
+          party: { type: "string", enum: ["customer", "cirkla", "unclear"] },
+          summary: { type: "string" },
+          evidence_quote: { type: ["string", "null"] },
+          confidence: { type: "number" },
+          about_other_customer: { type: "boolean" },
+        },
+        required: ["customer_id", "category", "metric", "value", "period", "kind", "party", "summary", "confidence"],
+      },
+    },
   },
-  required: ["facts"],
+  required: ["facts", "metrics"],
 } as const;
 
 export interface PromptInput {

@@ -10,6 +10,8 @@
  * dropped, and every cited fact is shown with its date, quote and review state.
  */
 
+import { CATEGORY_LABEL, describeValue, describeYearly } from "@/lib/metrics/format";
+
 export const ANSWER_MAX_TOKENS = 900;
 /** Facts sent per question: the newest relevant ones, after removing duplicates. */
 export const MAX_FACTS = 25;
@@ -67,6 +69,7 @@ export const HELP_TEXT = [
   "• _What's open with Acme Foods?_",
   "• _What pricing have we quoted Acme Foods?_",
   "• _Any quality issues from Acme Foods this year?_",
+  "• _How many birds a day does Acme Foods process? What's their annual tray usage?_",
   "• _Who has been emailing Acme Foods?_ (I name the colleague only when you ask)",
   "I only use stored facts. Facts nobody has checked yet are marked *unverified*.",
 ].join("\n");
@@ -108,6 +111,7 @@ How to answer:
 - If nothing answers the question, say so in one sentence and add the single latest relevant item, if any.
 - Total under 80 words, except HISTORY answers. Plain Slack text: • bullets, *bold* sparingly. No headings, no sources list.
 - End each bullet with the ids it relies on, like [F3] or [F2][F5]. Nothing else in square brackets.
+- Facts of type metric are the customer's own numbers (production, packaging usage, forecasts, order volumes, spend, size). Give the number with its unit, period and scope, say whether it is actual, capacity, forecast, target or estimate, give the yearly equivalent when the fact shows one, and the date it was said. If several figures for the same thing differ, give the newest and mention the older one with its date. Never add numbers up or convert them yourself.
 - Stance matters: a request or proposal is not an agreement. Say "asked for", "quoted" or "proposed" unless the stance is commitment.
 - Add "(unverified)" for facts marked UNVERIFIED, and "(no update since)" for open facts marked STALE.
 - Name people exactly as the fact's summary names them (first name is fine: "Glenn asked Greg for…"). Never add, swap or guess a person's name: the mailbox a fact was found in is not who wrote or received the email. If a summary names only a company, use the company name.
@@ -123,7 +127,8 @@ export const fmtDate = (iso: string) => {
 /** Fact types a question is about, from plain words. Empty: a general question. */
 const TOPICS: [RegExp, string[]][] = [
   [/\b(?:pric\w*|quot\w*|cost\w*|rate|rates|usd|inr|per (?:tray|case|unit)|cheaper|discount\w*)\b/i, ["pricing"]],
-  [/\b(?:orders?|ordered|po|pos|purchase orders?|volumes?|quantit\w*|forecast\w*)\b/i, ["order", "requirement"]],
+  [/\b(?:orders?|ordered|po|pos|purchase orders?|volumes?|quantit\w*|forecast\w*)\b/i, ["order", "requirement", "metric"]],
+  [/\b(?:how (?:many|much|big|large)|throughput|capacity|usage|use per|uses?|consum\w*|process(?:es|ed|ing)?|lbs|pounds|birds|head|plants?|stores?|lines|shifts?|revenue|spend|budget|size|annual\w*|yearly|per (?:day|week|month|year)|numbers?|run[- ]?rate|metrics?)\b/i, ["metric"]],
   [/\b(?:deliver\w*|ship\w*|dispatch\w*|eta|arriv\w*|transit|container|freight|lead ?times?)\b/i, ["delivery"]],
   [/\b(?:quality|complain\w*|defect\w*|issues?|problems?|leak\w*|wick\w*|damage\w*|claims?|rca)\b/i, ["quality_issue"]],
   [/\b(?:requirement\w*|specs?|specifications?|needs?|samples?|prototyp\w*|trials?)\b/i, ["requirement", "follow_up"]],
@@ -317,7 +322,9 @@ export function renderAnswer(
   );
   const title = `*${escapeSlack(opts.customers.map((c) => c.customer_name).join(", "))}*`;
   const links = opts.customers.map((c) => `<${factsPageUrl(opts.appUrl, c.customer_id, citedRange(facts, cited, c.customer_id))}|${opts.customers.length > 1 ? escapeSlack(c.customer_name) : "evidence and sources"}>`);
-  const footer = `_From ${cited.size || facts.length} stored fact${(cited.size || facts.length) === 1 ? "" : "s"} · ${links.join(" · ")}_`;
+  const numberCustomers = [...new Set([...cited].map((n) => facts[n - 1]).filter((f) => f && f.fact_type === "metric").map((f) => f.customer_id))];
+  const numberLinks = numberCustomers.map((id) => `<${numbersPageUrl(opts.appUrl, id)}|${opts.customers.length > 1 ? `${escapeSlack(opts.customers.find((c) => c.customer_id === id)?.customer_name ?? "")} numbers` : "numbers"}>`);
+  const footer = `_From ${cited.size || facts.length} stored fact${(cited.size || facts.length) === 1 ? "" : "s"} · ${[...links, ...numberLinks].join(" · ")}_`;
   let text = `${title}\n${body}\n${footer}`;
   if (text.length > MAX_REPLY_CHARS) text = `${text.slice(0, MAX_REPLY_CHARS - 1)}…`;
   return { text, cited: cited.size };
@@ -325,8 +332,55 @@ export function renderAnswer(
 
 /** Reply without an AI call when the question's topic has no stored facts. */
 export function noTopicFacts(customers: CustomerMatch[], types: string[], latest: SlackFact | undefined, appUrl: string): string {
-  const what = types.map((t) => t.replace("_", " ")).join(" / ");
+  const what = types.map((t) => (t === "metric" ? "number" : t.replace("_", " "))).join(" / ");
   const name = escapeSlack(customers.map((c) => c.customer_name).join(", "));
   const last = latest ? `\nLatest activity: ${fmtDate(latest.message_at)}: ${escapeSlack(latest.summary)}` : "";
   return `*${name}*\nNo ${what} facts are stored for ${name}.${last}\n_<${factsPageUrl(appUrl, customers[0].customer_id)}|All facts for this customer>_`;
+}
+
+/** A customer number (0018) as the Slack worker returns it. */
+export interface SlackMetric {
+  metric_id: string;
+  customer_id: string;
+  customer_name: string;
+  category: string;
+  metric: string;
+  value: number | string;
+  value_max: number | string | null;
+  unit: string | null;
+  currency: string | null;
+  period: string;
+  scope: string | null;
+  kind: string;
+  as_of: string | null;
+  party: string;
+  summary: string;
+  evidence_quote: string | null;
+  confidence: number | string;
+  review_state: string;
+  message_at: string;
+  direction: string;
+}
+
+/**
+ * A customer number shown to the answer model as a fact of type "metric": the
+ * value, unit, period, scope and yearly equivalent are written out (worked out
+ * here, never by the model), followed by the extracted sentence.
+ */
+export function metricAsFact(m: SlackMetric): SlackFact {
+  const yearly = describeYearly(m);
+  const what = `${CATEGORY_LABEL[m.category] ?? m.category}: ${m.metric}${m.scope ? ` (${m.scope})` : ""} = ${describeValue(m)}${yearly ? `; ${yearly}` : ""}${m.as_of ? ` (for ${m.as_of})` : ""}.`;
+  return {
+    fact_id: m.metric_id, customer_id: m.customer_id, customer_name: m.customer_name, fact_type: "metric", stance: m.kind,
+    party: m.party, basis: "explicit", status: "not_applicable", status_basis: "none", stale: false,
+    product: null, quantity: null, unit: null, unit_price: null, currency: null, price_basis: null, due_date: null, due_text: null,
+    reference: null, summary: `${what} ${m.summary}`.slice(0, 600), evidence_quote: m.evidence_quote, confidence: m.confidence,
+    review_state: m.review_state, message_at: m.message_at, direction: m.direction, is_mine: false,
+    source_owner_email: null, mailbox_email: null, gmail_message_id: null,
+  };
+}
+
+/** Link to a customer's numbers. */
+export function numbersPageUrl(appUrl: string, customerId: string): string {
+  return `${appUrl.replace(/\/+$/, "")}/numbers?customer=${encodeURIComponent(customerId)}`;
 }

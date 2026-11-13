@@ -13,7 +13,7 @@
  */
 import { z } from "zod";
 import { redactField } from "./redact";
-import { FACT_TYPES, STANCES, STATUSES } from "./prompt";
+import { FACT_TYPES, METRIC_CATEGORIES, METRIC_KINDS, METRIC_PERIODS, STANCES, STATUSES } from "./prompt";
 
 export type ReviewReason =
   | "quote_not_found"
@@ -129,6 +129,13 @@ export function numbersIn(text: string): number[] {
     if (unit === "k") out.push(base * 1_000);
     else if (unit.startsWith("lakh") || unit.startsWith("lac")) out.push(base * 100_000);
     else if (unit === "million" || unit === "mn" || unit === "m") out.push(base * 1_000_000);
+  }
+  // A range whose multiplier is written once, after the second number: "15-18 million", "200 to 250k".
+  for (const m of text.matchAll(/(\d[\d,]*(?:\.\d+)?)\s*(?:-|–|to)\s*\d[\d,]*(?:\.\d+)?\s*(k|lakhs?|lacs?|million|mn|m)\b/gi)) {
+    const base = Number(m[1].replace(/,/g, ""));
+    if (!Number.isFinite(base)) continue;
+    const unit = m[2].toLowerCase();
+    out.push(base * (unit === "k" ? 1_000 : unit.startsWith("la") ? 100_000 : 1_000_000));
   }
   return out;
 }
@@ -293,4 +300,155 @@ export function validateFacts(raw: unknown, ctx: ValidationContext): ValidationR
     });
   }
   return { facts, dropped };
+}
+
+// ---------------------------------------------------------------------------
+// x7: customer numbers (metrics). Same guarantees as facts: the number must be
+// in the email, quotes verbatim, every string re-redacted and capped, personal
+// matters dropped. A number about another company is dropped, not reviewed.
+// ---------------------------------------------------------------------------
+
+export type MetricDropReason = DropReason | "other_company" | "money_without_unit";
+
+export interface CommitMetric {
+  customer_id: string;
+  metric_index: number;
+  category: (typeof METRIC_CATEGORIES)[number];
+  metric: string;
+  value: number;
+  value_max: number | null;
+  unit: string | null;
+  currency: string | null;
+  period: (typeof METRIC_PERIODS)[number];
+  scope: string | null;
+  kind: (typeof METRIC_KINDS)[number];
+  as_of: string | null;
+  party: "customer" | "cirkla" | "unclear";
+  summary: string;
+  evidence_quote: string | null;
+  confidence: number;
+  review_reasons: ReviewReason[];
+}
+
+const modelMetric = z.object({
+  customer_id: z.string(),
+  category: z.enum(METRIC_CATEGORIES),
+  metric: z.string().min(1),
+  value: z.number().finite().nonnegative(),
+  value_max: nullableNumber,
+  unit: nullableString,
+  currency: nullableString,
+  period: z.enum(METRIC_PERIODS).catch("none"),
+  scope: nullableString,
+  kind: z.enum(METRIC_KINDS),
+  as_of: nullableString,
+  party: z.enum(["customer", "cirkla", "unclear"]),
+  summary: z.string().min(1),
+  evidence_quote: nullableString,
+  confidence: z.number().finite(),
+  about_other_customer: z.boolean().optional(),
+});
+
+export function validateMetrics(raw: unknown, ctx: ValidationContext): { metrics: CommitMetric[]; dropped: Partial<Record<MetricDropReason, number>> } {
+  const dropped: Partial<Record<MetricDropReason, number>> = {};
+  const drop = (r: MetricDropReason) => (dropped[r] = (dropped[r] ?? 0) + 1);
+  const list = raw && typeof raw === "object" && Array.isArray((raw as { metrics?: unknown }).metrics) ? ((raw as { metrics: unknown[] }).metrics) : [];
+  const customerIds = new Set(ctx.customers.map((c) => c.id));
+  const textNorm = ws(ctx.text);
+  const numbers = numbersIn(`${ctx.text}\n${ctx.context ?? ""}`);
+  const seen = new Set<string>();
+  const metrics: CommitMetric[] = [];
+
+  for (const item of list) {
+    if (metrics.length >= 15) {
+      drop("over_limit");
+      continue;
+    }
+    const parsed = modelMetric.safeParse(item);
+    if (!parsed.success) {
+      drop("invalid_shape");
+      continue;
+    }
+    const m = parsed.data;
+    if (!customerIds.has(m.customer_id)) {
+      drop("unknown_customer");
+      continue;
+    }
+    if (m.about_other_customer) {
+      drop("other_company");
+      continue;
+    }
+    if ([m.metric, m.summary, m.evidence_quote, m.scope].some((v) => v && SENSITIVE_TOPIC.test(v))) {
+      drop("sensitive_topic");
+      continue;
+    }
+
+    const reasons = new Set<ReviewReason>();
+    if (ctx.truncated) reasons.add("truncated_email");
+    if (INJECTION_MARKERS.test(ctx.text)) reasons.add("possible_injection");
+
+    let quote = redactField(m.evidence_quote, 200);
+    if (quote && !textNorm.includes(ws(quote))) {
+      quote = null;
+      reasons.add("quote_not_found");
+    } else if (!quote) {
+      reasons.add("no_quote");
+    }
+
+    if (m.value > 1e13 || (m.value_max !== null && m.value_max > 1e13)) {
+      drop("invalid_shape");
+      continue;
+    }
+    if (!numbers.some((n) => near(n, m.value))) reasons.add("number_not_in_text");
+    let valueMax = m.value_max;
+    if (valueMax !== null && (valueMax < m.value || !numbers.some((n) => near(n, valueMax!)))) {
+      if (valueMax >= m.value) reasons.add("number_not_in_text");
+      else valueMax = null;
+    }
+
+    let currency = m.currency ? m.currency.trim().toUpperCase() : null;
+    if (currency && !CURRENCIES.has(currency)) {
+      currency = null;
+      reasons.add("unknown_currency");
+    }
+    const unit = redactField(m.unit, 30);
+    if (m.category === "spend_price" && !unit && !currency) {
+      drop("money_without_unit");
+      continue;
+    }
+
+    const metric = redactField(m.metric, 80);
+    const summary = redactField(m.summary, 300);
+    if (!metric || !summary) {
+      drop("invalid_shape");
+      continue;
+    }
+    const key = `${m.customer_id}|${ws(metric)}|${m.value}|${m.period}|${ws(m.scope ?? "")}`;
+    if (seen.has(key)) {
+      drop("duplicate");
+      continue;
+    }
+    seen.add(key);
+
+    metrics.push({
+      customer_id: m.customer_id,
+      metric_index: metrics.length,
+      category: m.category,
+      metric,
+      value: m.value,
+      value_max: valueMax,
+      unit,
+      currency,
+      period: m.period,
+      scope: redactField(m.scope, 80),
+      kind: m.kind,
+      as_of: m.as_of && /^\d{4}(-\d{2})?$/.test(m.as_of) ? m.as_of : null,
+      party: m.party,
+      summary,
+      evidence_quote: quote,
+      confidence: Math.round(Math.min(1, Math.max(0, m.confidence)) * 100) / 100,
+      review_reasons: [...reasons].sort(),
+    });
+  }
+  return { metrics, dropped };
 }

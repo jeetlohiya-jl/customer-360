@@ -25,9 +25,14 @@ export default async function AppLayout({ children }: { children: React.ReactNod
             Search
           </Link>
           {getExtractConfig().enabled ? (
-            <Link href="/facts" className="navlink">
-              Customer facts
-            </Link>
+            <>
+              <Link href="/facts" className="navlink">
+                Customer facts
+              </Link>
+              <Link href="/numbers" className="navlink">
+                Customer numbers
+              </Link>
+            </>
           ) : null}
           {user.role === "admin" ? (
             <>

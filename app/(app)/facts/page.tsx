@@ -105,6 +105,7 @@ export default async function FactsPage({ searchParams }: { searchParams: Promis
           Extracted by AI from customer emails, each with a short quote as evidence. &quot;Requested&quot; and &quot;Proposed&quot; are
           not agreements. &quot;AI-extracted&quot; means no person has checked it yet.
         </p>
+        {current ? <p className="small"><Link href={`/numbers?customer=${current.customer_id}`}>Numbers for {current.customer_name}</Link> (volumes, usage, forecasts, spend)</p> : null}
       </div>
       {sp.ok ? <p className="notice">Saved.</p> : null}
       {sp.error || error ? <p className="notice alert" role="alert">That could not be completed. Check the values and try again.</p> : null}

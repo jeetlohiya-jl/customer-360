@@ -9,7 +9,7 @@ import { costMicroUsd, ModelError, type Usage } from "@/lib/extract/model";
 import { MODEL_ID } from "@/lib/extract/prompt";
 import { redact } from "@/lib/extract/redact";
 import { errorCode } from "@/lib/scan/errors";
-import { buildAnswerPrompt, focusPeople, HELP_TEXT, HISTORY_FETCH, isHelp, LATEST_FACTS, noTopicFacts, pickCustomers, renderAnswer, selectFacts, selectHistory, topicTypes, wantsHistory, wantsLatest, wantsOpenItems, type CustomerMatch, type SlackFact } from "./answer";
+import { buildAnswerPrompt, focusPeople, HELP_TEXT, HISTORY_FETCH, isHelp, LATEST_FACTS, noTopicFacts, pickCustomers, renderAnswer, selectFacts, selectHistory, topicTypes, wantsHistory, wantsLatest, wantsOpenItems, metricAsFact, type CustomerMatch, type SlackFact, type SlackMetric } from "./answer";
 import { SlackError, type SlackApi } from "./api";
 import { answerReservationMicroUsd, type AnswerModel } from "./model";
 
@@ -19,6 +19,8 @@ export interface SlackDb {
   allow(userId: string): Promise<boolean>;
   customers(question: string): Promise<CustomerMatch[]>;
   facts(userId: string, customerIds: string[], showOwner: boolean, limit: number): Promise<SlackFact[]>;
+  /** 0018: the customers' numbers this person may see, newest first. */
+  metrics?(userId: string, customerIds: string[], limit: number): Promise<SlackMetric[]>;
   reserve(microUsd: number): Promise<string | null>;
   settle(reservationId: string, usage: Usage & { actual_microusd: number; model: string }): Promise<void>;
 }
@@ -125,12 +127,18 @@ export async function handleDm(deps: SlackDeps, ev: DmEvent): Promise<DmOutcome>
     const topicText = customers.reduce((q, c) => q.replace(new RegExp(c.matched.split(" ").map((w) => w.replace(/[^a-z0-9]/g, "")).filter(Boolean).join("[^a-z0-9]+"), "gi"), " "), question);
     const openItems = wantsOpenItems(topicText);
     const history = !openItems && wantsHistory(question);
-    const all = await deps.db.facts(who.user_id, customers.map((c) => c.customer_id), true, history ? HISTORY_FETCH : 120);
+    const types = topicTypes(topicText);
+    const factRows = await deps.db.facts(who.user_id, customers.map((c) => c.customer_id), true, history ? HISTORY_FETCH : 120);
+    // Questions about size, volumes or usage also get the customers' numbers (0018), as facts of type "metric".
+    const numberRows = types.includes("metric") && deps.db.metrics
+      ? (await deps.db.metrics(who.user_id, customers.map((c) => c.customer_id), 60)).map(metricAsFact)
+      : [];
+    counts.metrics = numberRows.length;
+    const all = [...factRows, ...numberRows].sort((a, b) => b.message_at.localeCompare(a.message_at));
     if (all.length === 0) {
       await reply(MESSAGES.noFacts(customers.map((c) => c.customer_name).join(", ")));
       return (outcome = "no_facts");
     }
-    const types = topicTypes(topicText);
     const latest = !history && !openItems && wantsLatest(question);
     const selected = history ? selectHistory(types.length ? all.filter((f) => types.includes(f.fact_type)) : all) : selectFacts(all, types, { openFirst: openItems });
     const facts = latest ? selected.slice(0, LATEST_FACTS) : selected;

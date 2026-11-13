@@ -17,7 +17,7 @@ import { costMicroUsd, ModelError, reservationMicroUsd, type ExtractModel, type 
 import { buildUserMessage, headerPeople, MODEL_ID } from "./prompt";
 import { redact, type RedactionKind } from "./redact";
 import { cleanBody, mimeText, prefilter, SHORT_REPLY_CHARS, type SkipReason } from "./text";
-import { validateFacts, type CommitFact, type DropReason, type ReviewReason } from "./validate";
+import { validateFacts, validateMetrics, type CommitFact, type CommitMetric, type DropReason, type ReviewReason } from "./validate";
 
 export interface ClaimedItem {
   owner_id: string;
@@ -45,6 +45,8 @@ export interface ExtractDb {
   reserve(microUsd: number): Promise<string | null>;
   settle(reservationId: string, usage: Usage & { actual_microusd: number; model: string }): Promise<void>;
   commit(ownerId: string, messageId: string, facts: CommitFact[]): Promise<number>;
+  /** x7: the email's customer numbers; stored while the email is still claimed, just before commit(). */
+  metrics?(ownerId: string, messageId: string, metrics: CommitMetric[]): Promise<number>;
   skip(ownerId: string, messageId: string, reason: SkipReason | "excluded" | "deleted"): Promise<void>;
   fail(ownerId: string, messageId: string, code: string): Promise<string>;
   release(ownerId: string, messageId: string): Promise<void>;
@@ -74,6 +76,7 @@ export interface TickSummary {
   released: number;
   facts: number;
   facts_for_review: number;
+  metrics: number;
   dropped: Partial<Record<DropReason, number>>;
   review_reasons: Partial<Record<ReviewReason, number>>;
   skip_reasons: Partial<Record<SkipReason | "excluded" | "deleted", number>>;
@@ -157,7 +160,7 @@ function add<K extends string>(into: Partial<Record<K, number>>, from: Partial<R
 export async function runExtractTick(deps: ExtractDeps): Promise<TickSummary> {
   const log = deps.log ?? (() => {});
   const sum: TickSummary = {
-    status: "idle", claimed: 0, extracted: 0, skipped: 0, failed: 0, released: 0, facts: 0, facts_for_review: 0,
+    status: "idle", claimed: 0, extracted: 0, skipped: 0, failed: 0, released: 0, facts: 0, facts_for_review: 0, metrics: 0,
     dropped: {}, review_reasons: {}, skip_reasons: {}, redactions: {}, cost_microusd: 0,
   };
 
@@ -239,14 +242,19 @@ export async function runExtractTick(deps: ExtractDeps): Promise<TickSummary> {
         await inStage("db_settle", () => deps.db.settle(res, { ...result.usage, actual_microusd: cost, model: MODEL_ID }));
         sum.cost_microusd += cost;
 
-        const v = validateFacts(result.output, {
+        const vctx = {
           text: prep.text,
           context: prep.context,
           messageDate: item.message_at.slice(0, 10),
           customers: item.customers,
           openFacts: openFacts.map((f) => ({ id: f.id, customer_id: f.customer_id })),
           truncated: prep.truncated,
-        });
+        };
+        const v = validateFacts(result.output, vctx);
+        if (deps.db.metrics) {
+          const vm = validateMetrics(result.output, vctx);
+          sum.metrics += await inStage("db_commit", () => deps.db.metrics!(ownerId, item.gmail_message_id, vm.metrics));
+        }
         add(sum.dropped, v.dropped);
         for (const f of v.facts) for (const r of f.review_reasons) sum.review_reasons[r] = (sum.review_reasons[r] ?? 0) + 1;
         const n = await inStage("db_commit", () => deps.db.commit(ownerId, item.gmail_message_id, v.facts));
